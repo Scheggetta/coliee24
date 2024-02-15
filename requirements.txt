@@ -1,6 +1,6 @@
 # Python 3.11.7
 
-torch==2.1.2
+torch
 torcheval
 transformers
 tqdm
