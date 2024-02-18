@@ -6,6 +6,10 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 import shutil
 
+from memory_profile import total_size
+from model import Model
+
+
 if not (Path('Dataset/Train_Queries').exists() and Path('Dataset/Train_Evidence').exists()):
     print("Separating Dataset...")
     file = open("Dataset/task1_train_labels_2024.json")
@@ -23,10 +27,23 @@ if not (Path('Dataset/Train_Queries').exists() and Path('Dataset/Train_Evidence'
                             Path.joinpath(Path('Dataset/Train_Evidence'), Path(f)))
 
 
-
-
-
 Roby = AutoModel.from_pretrained('roberta-base')
 tokenizer = AutoTokenizer.from_pretrained('roberta-base')
-q_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Evidence'), x)).read().replace('”',  '') for x in os.listdir('Dataset/Train_Evidence')], padding=True, return_tensors='pt')
+e_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Evidence'), x)).read() for x in os.listdir('Dataset/Train_Evidence')], padding=True, truncation=True, max_length=512, return_tensors='pt')
 
+
+# print(len(os.listdir('Dataset/Train_Evidence')))
+# print(total_size(q_embed.data))
+
+
+def take_first_k(embed, k):
+    embed['input_ids'] = embed['input_ids'][:k]
+    embed['attention_mask'] = embed['attention_mask'][:k]
+    return embed
+
+e_embed = take_first_k(e_embed, 10)
+model = Model('roberta-base')
+result = model(e_embed)
+
+
+pass
