@@ -11,7 +11,7 @@ import random
 import pandas as pd
 from lingua import Language, LanguageDetectorBuilder
 from argostranslate import package, translate
-
+import re
 
 pd.set_option('display.max_columns', None)
 package.install_from_path('fr_en.argosmodel')
@@ -157,18 +157,55 @@ def compare_french_english_script(path_to_file):
             if lan.language == Language.FRENCH:
                 french_text = text[lan.start_index:lan.end_index]
                 translated_text = translation_fr_en.translate(french_text)
-                # if translated_text != french_text:
-                file_french_translations.append((french_text, translated_text))
+                if translated_text != french_text:
+                    file_french_translations.append((french_text, translated_text))
     return file_french_translations
     # pitfalls: the language detection is a hard tarsk because we are with English and French which are very similar.
     # Moreover, both the language detector and translation tool are robust enough to take account of several kind of typos
     # then sometimes the translation is affected by the fact that the detection tool takes classifies English sentence as French
 
 
+def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
+    freq_dict = dict()
+    for file in os.listdir(directory):
+        with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:
+            text = f.read()
+            list_found_keys = re.findall(r'\[.*?\]', text)
+            for key in list_found_keys:
+                if key in freq_dict.keys():
+                    freq_dict[key] += 1
+                else:
+                    freq_dict[key] = 1
+    return freq_dict
+    # numbers: 1222
+    # strings: 6404
+    # There are more than 1000 numbers describing paragraphs
+    # So it's difficult to discriminate between dates and paragraph numbers
+    # Among the strings there are:
+    #       notes (in English and in French)
+    #       names of the documents
+    #       names of people related to that case
+    #       acronyms
+    #       references to other documents
+    #       references to other cases
+    #       references to other paragraphs
+    #       references to other laws
+    #       references to footnotes
+    #       references to citations
+    #       references to omitted fragments
+    # TODO: consider to use chatGPT to process this kind of data
+    # TODO: Look at the distribution of the brackets in the dataset
+    # dict(sorted([(f,freqs[f]) for f in freqs.keys() if not(f[1:-1].isnumeric())], key=lambda x: x[1], reverse=True))
+    # dict(sorted([(f,freqs[f]) for f in freqs.keys() if f[1:-1].isnumeric()], key=lambda x: x[1], reverse=True)
+
+
 if __name__ == '__main__':
-    to_be_trad = Path.joinpath(Path('Dataset/Train_Queries'), Path(os.listdir('Dataset/Train_Queries')[0]))
-    print(*compare_french_english_script(to_be_trad), sep='\n')
-    quit(0)
+    # freqs = get_bracket_freqs_dataset()
+    # print(freqs)
+    # quit(0)
+    # to_be_trad = Path.joinpath(Path('Dataset/Train_Queries'), Path(os.listdir('Dataset/Train_Queries')[0]))
+    # print(*compare_french_english_script(to_be_trad), sep='\n')
+    # quit(0)
     # files_french_perc_q, dataset_french_perc_q = get_french_percentage()
     # files_french_perc_e, dataset_french_perc_e = get_french_percentage(False)
     # quit(0)

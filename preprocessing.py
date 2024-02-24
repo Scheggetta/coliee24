@@ -1,5 +1,54 @@
 from openai import OpenAI
 import re
+import os
+from pathlib import Path
+import nltk
+
+
+def remove_multiple_new_lines(text):
+    processed_file = re.sub(r'(\n{2,})|(\s\n){2,}', '\n', text)
+    processed_file = re.sub(r'(\n\s)', '\n', processed_file)
+    if processed_file[0] == '\n':
+        processed_file = processed_file[1:]
+    return processed_file
+
+
+def remove_end_file(text):
+    return re.sub(r'\[End of document\]', '', text)
+
+
+def remove_editor_name(text):
+    return re.sub(r'Editor:.*\n', '', text)
+
+
+def remove_suppressed_pattern(text):
+    return re.sub(r'.{0,1}\w*_suppressed.{0,1}', '', text, flags=re.IGNORECASE)
+
+
+def sub_multiple_suppressed_pattern(text):  # TODO: to be tested
+    processed_text = re.sub(r'.{0,1}\w*_suppressed.{0,1}', ' OMISSIS ', text, flags=re.IGNORECASE)
+    return re.sub(r'(.{0,1}OMISSIS.{0,1}){2,}', ' OMISSIS ', processed_text)
+
+
+def remove_multiple_ellipsis(text):
+    return re.sub(r'((\.\s{0,}){4,})', '', text)
+
+
+def remove_non_ascii(text):
+    return re.sub(r'[^\x00-\x7F]+', '', text)
+
+
+directory = 'Dataset/Train_Queries'
+file_name = '001153.txt'  # os.listdir(directory)[3]
+file_text = open(Path.joinpath(Path(directory), Path(file_name))).read()
+
+processed_file = remove_end_file(file_text)
+processed_file = remove_editor_name(processed_file)
+processed_file = remove_suppressed_pattern(processed_file)  # if switch else sub_multiple_suppressed_pattern(processed_file)
+processed_file = remove_multiple_ellipsis(processed_file)
+processed_file = remove_non_ascii(processed_file)
+processed_file = remove_multiple_new_lines(processed_file)
+quit(0)
 
 client = OpenAI()
 
