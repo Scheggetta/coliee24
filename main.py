@@ -80,6 +80,7 @@ e_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Evidence'), x)).read
 
 
 def take_first_k(embed, k):
+    # TODO: delete `encodings` list from `embed` to free memory
     embed['input_ids'] = embed['input_ids'][:k]
     embed['attention_mask'] = embed['attention_mask'][:k]
     return embed
