@@ -9,6 +9,14 @@ import shutil
 
 from memory_profile import total_size
 from model import Model
+from functools import reduce
+
+
+def check_queries_evidences_split():
+    fl = open("Dataset/task1_train_labels_2024.json")
+    js = json.load(fl)
+    evidence_list = reduce(lambda x,y: x+y, js.values())
+    return all([Path.joinpath(Path('Dataset/Train_Evidence'), Path(f)).exists() for f in evidence_list])
 
 
 if not (Path('Dataset/Train_Queries').exists() and Path('Dataset/Train_Evidence').exists()):
@@ -81,4 +89,3 @@ e_embed = take_first_k(e_embed, 10)
 model = Model('roberta-base')
 result = model(q_embed, e_embed)
 
-pass
