@@ -7,7 +7,7 @@ from openai import OpenAI
 from preprocessing.regex import regex_preprocessing, regex_preprocessing_single_file
 
 
-dataset_to_preprocess = 'train'  # Possible values: 'train', 'test'
+dataset_to_preprocess = 'test'  # Possible values: 'train', 'test'
 TRAIN_DATASET_DIR = Path.joinpath(Path(Path(__file__).parent.parent), Path('Dataset/task1_train_files_2024'))
 TEST_DATASET_DIR = Path.joinpath(Path(Path(__file__).parent.parent), Path('Dataset/task1_test_files_2024'))
 DATASET_DIR = TRAIN_DATASET_DIR if dataset_to_preprocess == 'train' else TEST_DATASET_DIR
@@ -21,23 +21,21 @@ if not Path.exists(REGEX_PREPROCESSED_DIR):
     regex_preprocessing(input_directory=DATASET_DIR, output_directory=REGEX_PREPROCESSED_DIR)
 # Get regex preprocessed files from the file system
 regex_preprocessed_files = [open(Path.joinpath(REGEX_PREPROCESSED_DIR, Path(f))).read() for f in os.listdir(REGEX_PREPROCESSED_DIR)]
-pass
 
-
-client = OpenAI()
-
-
-
-file = open("/home/edo/PycharmProjects/coliee24/Dataset/Train_Queries/001299.txt").read()
 
 # Split the text into paragraphs using re library.
 # Each paragraph starts with `[N]` where N is an integer number with maximum 3 digits
-text = re.split(r'\[\d{1,3}\]', file)
+preprocessed_file = regex_preprocessed_files[0]
+
+# preprocessed_file = open(Path.joinpath(REGEX_PREPROCESSED_DIR, Path('069639.txt'))).read()
+paragraphs = re.split(r'\[\d{1,4}\]', preprocessed_file)
 
 # TODO:
 #  - tokenization to count how many tokens to give to the model for each message
 #  - parallelize model calls
 
+
+client = OpenAI()
 
 response = client.chat.completions.create(
   model="gpt-3.5-turbo-0125",

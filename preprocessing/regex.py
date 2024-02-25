@@ -12,6 +12,7 @@ import re
 #  - remove tab/space at the beginning of the line
 #  - remove Editor's note, like `Editor: Marco Rossi`
 #  - remove frequent notes, like `[End of document]`, `[Translation]`, `MLB headnote and full text`, `This case is unedited, therefore contains no summary.`, `[French language version follows English language version]`, `[La version française vient à la suite de la version anglaise]`, `MLB unedited judgment`, etc...
+#  - consider the subsection (1), (2), etc.. problem. Example: 069639.txt
 
 
 def remove_multiple_new_lines(text):
@@ -20,6 +21,13 @@ def remove_multiple_new_lines(text):
     if processed_file[0] == '\n':
         processed_file = processed_file[1:]
     return processed_file
+
+
+def remove_year_brackets(text):
+    text = re.sub(r'\[(18\d{2})\]', r'\1', text)
+    text = re.sub(r'\[(19\d{2})\]', r'\1', text)
+    text = re.sub(r'\[(20\d{2})\]', r'\1', text)
+    return text
 
 
 def remove_end_file(text):
@@ -55,6 +63,7 @@ def regex_preprocessing(input_directory, output_directory):
 
         # TODO: refactor with a single function
         processed_file = remove_end_file(file_text)
+        processed_file = remove_year_brackets(processed_file)
         processed_file = remove_editor_name(processed_file)
         processed_file = remove_suppressed_pattern(processed_file)  # if switch else sub_multiple_suppressed_pattern(processed_file)
         processed_file = remove_multiple_ellipsis(processed_file)
@@ -69,6 +78,7 @@ def regex_preprocessing_single_file(filepath):
     file = open(filepath).read()
 
     preprocessed_file = remove_end_file(file)
+    preprocessed_file = remove_year_brackets(preprocessed_file)
     preprocessed_file = remove_editor_name(preprocessed_file)
     preprocessed_file = remove_suppressed_pattern(preprocessed_file)
     preprocessed_file = remove_multiple_ellipsis(preprocessed_file)
@@ -79,7 +89,9 @@ def regex_preprocessing_single_file(filepath):
 
 
 if __name__ == '__main__':
-    filepath = Path.joinpath(Path(Path(__file__).parent.parent), Path('Dataset/task1_train_files_2024/000002.txt'))
+    dataset_to_preprocess = 'test'  # Possible values: 'train', 'test'
+    filepath = Path.joinpath(Path(Path(__file__).parent.parent),
+                             Path('Dataset/task1_%s_files_2024/069639.txt' % dataset_to_preprocess))
     preprocessed_file = regex_preprocessing_single_file(filepath)
 
     print(preprocessed_file)
