@@ -14,7 +14,7 @@ from argostranslate import package, translate
 import re
 
 pd.set_option('display.max_columns', None)
-package.install_from_path('fr_en.argosmodel')
+# package.install_from_path('fr_en.argosmodel') DO NOT remove this comment!!!
 
 
 def get_tokenizer():
@@ -165,7 +165,22 @@ def compare_french_english_script(path_to_file):
     # then sometimes the translation is affected by the fact that the detection tool takes classifies English sentence as French
 
 
-def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
+def get_parenthesis_freqs_dataset(directory='Dataset/task1_train_files_2024'):
+    freq_dict = dict()
+    for file in os.listdir(directory):
+        with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:
+            text = f.read()
+            list_found_keys = re.findall(r'\(.*?\)', text)
+            for key in list_found_keys:
+                if key in freq_dict.keys():
+                    freq_dict[key] += 1
+                else:
+                    freq_dict[key] = 1
+    return freq_dict
+    # No significant information can be extracted from the parenthesis
+
+
+def get_bracket_freqs_dataset(directory='../Dataset/task1_train_files_2024'):
     freq_dict = dict()
     for file in os.listdir(directory):
         with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:
@@ -193,31 +208,8 @@ def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
     #       references to footnotes
     #       references to citations
     #       references to omitted fragments
-    # TODO: consider to use chatGPT to process this kind of data
-    # TODO: Look at the distribution of the brackets in the dataset
     # dict(sorted([(f,freqs[f]) for f in freqs.keys() if not(f[1:-1].isnumeric())], key=lambda x: x[1], reverse=True))
     # dict(sorted([(f,freqs[f]) for f in freqs.keys() if f[1:-1].isnumeric()], key=lambda x: x[1], reverse=True)
-
-# TODO:
-#   - '[...]' (all variations)
-#   - Translation (all variations fr as well)
-#   - [[a-z]] are typos -> substitute with [a-z] only (generalize to more than one character example [the])
-#   - [see footnote [0-9]]
-#   - [emphasis added] (all variations)
-#   - [sic]
-#   - adjust something_suppressed detection
-#   - [redacted]
-#   - [acronyms] -> acronyms such as ([IRPA] -> IRPA, [RPD] -> RPD)
-#   - [para. [0-9]*]
-#   - [and also with] -> and also with
-#   - [[a-zA-Z]] to be done at the end of the preprocessing being sure that everything else is OK(to be revised)
-#   - [Non souligné dans l'original]
-#   - [the applicant] (all variations) -> the applicant
-#   - [English language version follows French language version] (all variations + fr)
-#   - [the act] -> the act (all variations)
-#   - [citation omitted]
-#   - [the board] (all variations) -> the board
-#   - remove everything that has a frequency less than 50 in the square brackets
 
 
 if __name__ == '__main__':
