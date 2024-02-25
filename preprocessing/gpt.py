@@ -9,7 +9,7 @@ import tiktoken
 from preprocessing.regular_exp import regex_preprocessing, regex_preprocessing_single_file
 
 
-SYSTEM_PROMPT = "You will be provided with a legal case document that you have to preprocess.\n\nWhat you must do:\n- keep the whole sentence in the same line;\n- add new line characters based on the paragraphs' contents;\n- do NOT change or remove any word;\n- do NOT add any word, just new line characters if necessary."
+SYSTEM_PROMPT = "You will be provided with a legal case document that you have to preprocess.\n\nAt the very beginning of the document there could be a part where the name of the case, applicants, respondent, dates, counsels, solicitors of records, references to other cases, topics, notes, summaries and related information are present. Out of all this, KEEP ONLY the main summary; then, you can continue the normal preprocessing.\n\nWhat you must do after that initial phase:\n- keep the whole sentence in the same line;\n- add new line characters based on the paragraphs' contents;\n- do NOT change any word;\n- do NOT remove any word;\n- do NOT add any word, just new line characters if necessary."
 
 
 encoding = tiktoken.get_encoding("cl100k_base")
@@ -102,7 +102,7 @@ def gpt_preprocessing_single_file(filepath, client):
 
 if __name__ == '__main__':
     start = time.time()
-    filepath = Path.joinpath(Path(REGEX_PREPROCESSED_DIR), Path('000308.txt'))
+    filepath = Path.joinpath(Path(REGEX_PREPROCESSED_DIR), Path('000127.txt'))
     preprocessed_file = gpt_preprocessing_single_file(filepath, client=OpenAI())
     print(preprocessed_file)
     print(time.time() - start)
