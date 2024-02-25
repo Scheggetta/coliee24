@@ -198,11 +198,32 @@ def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
     # dict(sorted([(f,freqs[f]) for f in freqs.keys() if not(f[1:-1].isnumeric())], key=lambda x: x[1], reverse=True))
     # dict(sorted([(f,freqs[f]) for f in freqs.keys() if f[1:-1].isnumeric()], key=lambda x: x[1], reverse=True)
 
+# TODO:
+#   - '[...]' (all variations)
+#   - Translation (all variations fr as well)
+#   - [[a-z]] are typos -> substitute with [a-z] only (generalize to more than one character example [the])
+#   - [see footnote [0-9]]
+#   - [emphasis added] (all variations)
+#   - [sic]
+#   - adjust something_suppressed detection
+#   - [redacted]
+#   - [acronyms] -> acronyms such as ([IRPA] -> IRPA, [RPD] -> RPD)
+#   - [para. [0-9]*]
+#   - [and also with] -> and also with
+#   - [[a-zA-Z]] to be done at the end of the preprocessing being sure that everything else is OK(to be revised)
+#   - [Non souligné dans l'original]
+#   - [the applicant] (all variations) -> the applicant
+#   - [English language version follows French language version] (all variations + fr)
+#   - [the act] -> the act (all variations)
+#   - [citation omitted]
+#   - [the board] (all variations) -> the board
+#   - remove everything that has a frequency less than 50 in the square brackets
+
 
 if __name__ == '__main__':
-    # freqs = get_bracket_freqs_dataset()
-    # print(freqs)
-    # quit(0)
+    freqs = get_bracket_freqs_dataset()
+    print(freqs)
+    quit(0)
     # to_be_trad = Path.joinpath(Path('Dataset/Train_Queries'), Path(os.listdir('Dataset/Train_Queries')[0]))
     # print(*compare_french_english_script(to_be_trad), sep='\n')
     # quit(0)
