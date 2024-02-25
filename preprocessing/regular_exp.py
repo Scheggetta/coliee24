@@ -35,7 +35,7 @@ def remove_end_file(text):
 
 
 def remove_editor_name(text):
-    return re.sub(r'Editor:.*\n', '', text)
+    return re.sub(r'(Editor:.*\n)|(Editor:.*$)', '', text)
 
 
 def remove_suppressed_pattern(text):
