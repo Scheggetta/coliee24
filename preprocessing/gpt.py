@@ -2,11 +2,18 @@ import os
 from pathlib import Path
 import re
 import time
+import concurrent.futures
+
 
 from openai import OpenAI
 import tiktoken
 
 from preprocessing.regular_exp import regex_preprocessing, regex_preprocessing_single_file
+
+
+# TODO:
+#  - parallelize model calls
+#  - assess if all paragraphs are below the token limit
 
 
 SYSTEM_PROMPT = "You will be provided with a legal case document that you have to preprocess.\n\nAt the very beginning of the document there could be a part where the name of the case, applicants, respondent, dates, counsels, solicitors of records, references to other cases, topics, notes, summaries and related information are present. Out of all this, KEEP ONLY the main summary; then, you can continue the normal preprocessing.\n\nWhat you must do after that initial phase:\n- keep the whole sentence in the same line;\n- add new line characters based on the paragraphs' contents;\n- do NOT change any word;\n- do NOT remove any word;\n- do NOT add any word, just new line characters if necessary."
@@ -40,11 +47,6 @@ if not Path.exists(REGEX_PREPROCESSED_DIR):
 # regex_preprocessed_files = [open(Path.joinpath(REGEX_PREPROCESSED_DIR, Path(f))).read() for f in os.listdir(REGEX_PREPROCESSED_DIR)]
 
 
-# TODO:
-#  - parallelize model calls
-#  - assess if all paragraphs are below the token limit
-
-
 def gpt_preprocessing(input_directory, output_directory):
     client = OpenAI()
     os.makedirs(output_directory, exist_ok=True)
@@ -55,6 +57,69 @@ def gpt_preprocessing(input_directory, output_directory):
 
         with open(Path.joinpath(Path(output_directory), Path(file_name)), 'w') as file:
             file.write(preprocessed_file)
+
+
+def gpt_preprocessing_parallelized(input_directory, output_directory):
+    # client = OpenAI()
+    os.makedirs(output_directory, exist_ok=True)
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        future_to_file = {executor.submit(gpsf,
+                                          Path.joinpath(Path(input_directory), Path(file_name))
+                                          ): file_name for file_name in os.listdir(input_directory)}
+        for future in concurrent.futures.as_completed(future_to_file):
+            file_name = future_to_file[future]
+            try:
+                preprocessed_file = future.result()
+            except Exception as exc:
+                print('%r generated an exception: %s' % (file_name, exc))
+            else:
+                with open(Path.joinpath(Path(output_directory), Path(file_name)), 'w') as file:
+                    file.write(preprocessed_file)
+
+
+def gpsf(filepath):
+    client = OpenAI()
+    file = open(filepath).read()
+
+    paragraphs = re.split(r'\[\d{1,4}\]', file)
+    token_count, total_token_count = get_token_count(paragraphs)
+
+    current_token_count = 0
+    text = ['']
+    preprocessed_file = ''
+    for i, count in enumerate(token_count):
+        if text[-1] == '':
+            text[-1] = paragraphs[i]
+            current_token_count = count
+        elif current_token_count + count <= MAX_TOKENS_INPUT:
+            text[-1] += paragraphs[i]
+            current_token_count += count
+        else:
+            text.append(paragraphs[i])
+            current_token_count = count
+
+    for i, t in enumerate(text):
+        print('Processing part %d of %d - file: %s' % (i + 1, len(text), str(filepath).split('/')[-1]))
+        response = client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": t
+                }
+            ],
+            temperature=0.0,
+            seed=62
+        )
+        preprocessed_file += '\n\n' + response.choices[0].message.content
+        # print(response.system_fingerprint)
+
+    return preprocessed_file
 
 
 def gpt_preprocessing_single_file(filepath, client):
@@ -105,5 +170,8 @@ if __name__ == '__main__':
     filepath = Path.joinpath(Path(REGEX_PREPROCESSED_DIR), Path('000127.txt'))
     preprocessed_file = gpt_preprocessing_single_file(filepath, client=OpenAI())
     print(preprocessed_file)
+
+    # gpt_preprocessing_parallelized(input_directory='/home/edo/PycharmProjects/coliee24/Dataset/gpt_test',
+    #                                output_directory='/home/edo/PycharmProjects/coliee24/Dataset/gpt_test_output')
     print(time.time() - start)
     print()
