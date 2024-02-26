@@ -14,7 +14,7 @@ from argostranslate import package, translate
 import re
 
 pd.set_option('display.max_columns', None)
-# package.install_from_path('fr_en.argosmodel') DO NOT remove this comment!!!
+package.install_from_path('fr_en.argosmodel')
 
 
 def get_tokenizer():
@@ -180,7 +180,7 @@ def get_parenthesis_freqs_dataset(directory='Dataset/task1_train_files_2024'):
     # No significant information can be extracted from the parenthesis
 
 
-def get_bracket_freqs_dataset(directory='../Dataset/task1_train_files_2024'):
+def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
     freq_dict = dict()
     for file in os.listdir(directory):
         with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:

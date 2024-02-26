@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 import re
-from data_analyser import get_bracket_freqs_dataset
 
 
 # TODO:
@@ -33,6 +32,27 @@ from data_analyser import get_bracket_freqs_dataset
 #   - [the board] (all variations) -> the board
 #   - remove everything that has a frequency less than 50 in the square brackets ----> DONE
 
+def remove_multiple_alien_topics(text):  # TODO: to be tested
+    aliens_topic_splits = re.split(r'aliens - topic (\d+(\.{1,}\d+){0,})', text, flags=re.IGNORECASE)
+    last_topic = aliens_topic_splits[-1]
+    last_topic_splits = re.split(r'\[\d{1,4}\]', last_topic, flags=re.IGNORECASE)
+    return '\n'.join([aliens_topic_splits[0]] + last_topic_splits[1:])
+
+
+def get_bracket_freqs_dataset(directory='../Dataset/task1_train_files_2024'):
+    freq_dict = dict()
+    for file in os.listdir(directory):
+        with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:
+            text = f.read()
+            list_found_keys = re.findall(r'\[.*?\]', text)
+            for key in list_found_keys:
+                if key in freq_dict.keys():
+                    freq_dict[key] += 1
+                else:
+                    freq_dict[key] = 1
+    return freq_dict
+
+
 def remove_translation_tag(text):
     return re.sub(r'\[(translation|traduction)\]', '', text, flags=re.IGNORECASE)
 
@@ -55,7 +75,7 @@ def remove_references(text):
 
 
 def remove_reported_typos(text):
-    return re.sub(r'(\[sic\]|\[SIC\])', '', text)
+    return re.sub(r'\[sic\]', '', text, flags=re.IGNORECASE)
 
 
 def correct_known_typos(text):
@@ -71,14 +91,13 @@ def remove_least_frequent_square_brackets(text):
 
 
 def remove_multiple_spaces(text):
-    return re.sub(r'\s{2,}|\n\s{1,}|\n\t{1,}', ' ', text)
+    return re.sub(r'( {2,}|\t{1,})', ' ', text)
 
 
 def remove_multiple_new_lines(text):
     processed_file = re.sub(r'(\n{2,})|(\s\n){2,}', '\n', text)
     processed_file = re.sub(r'(\n\s)', '\n', processed_file)
-    if processed_file[0] == '\n':
-        processed_file = processed_file[1:]
+    processed_file = re.sub(r'(^\n{1,})', '', processed_file)
     return processed_file
 
 
@@ -97,8 +116,8 @@ def remove_editor_name(text):
     return re.sub(r'(Editor:.*\n)|(Editor:.*$)', '', text)
 
 
-def remove_suppressed_pattern(text):
-    return re.sub(r'.{0,1}\w*_suppressed.{0,1}', '', text, flags=re.IGNORECASE)
+def remove_suppressed_pattern(text): # TODO: needs to be executed before the spaces and tabs removal
+    return re.sub(r'[\[<(]?[ \t]*\w*_suppressed[ \t]*[\]>)]?', ' ', text, flags=re.IGNORECASE)
 
 
 def sub_multiple_suppressed_pattern(text):  # TODO: to be tested
@@ -114,8 +133,8 @@ def remove_multiple_ellipsis(text):
     return re.sub(r'((\.\s{0,}){4,})', '', text)
 
 
-def remove_non_ascii(text): # FIXME: this is not working
-    return re.sub(r'[^\x00-\x7F]+', '', text)
+def remove_non_ascii(text):
+    return re.sub(r'[^\u0000-\u007E\u00A1-\u00AC\u00AE-\u01FF]', '', text)
 
 
 def regex_preprocessing(input_directory, output_directory):
@@ -140,7 +159,8 @@ def regex_preprocessing(input_directory, output_directory):
 def regex_preprocessing_single_file(filepath):
     file = open(filepath).read()
 
-    preprocessed_file = remove_end_file(file)
+    preprocessed_file = remove_multiple_alien_topics(file)
+    preprocessed_file = remove_end_file(preprocessed_file)
     preprocessed_file = remove_multiple_spaces(preprocessed_file)
     preprocessed_file = remove_emphasis_added_tag(preprocessed_file)
     preprocessed_file = replace_acronyms(preprocessed_file)
