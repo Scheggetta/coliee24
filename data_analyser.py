@@ -13,6 +13,7 @@ from lingua import Language, LanguageDetectorBuilder
 from argostranslate import package, translate
 import re
 import shutil
+import utils
 
 pd.set_option('display.max_columns', None)
 package.install_from_path('fr_en.argosmodel')
@@ -125,11 +126,11 @@ def get_evidences(query):
     return labels[query]
 
 
-def pick_random_evidence(notch_evidences):
+def pick_random_evidence(notch_evidences, n=5):
     evidence_set = set(os.listdir('Dataset/Train_Evidence'))
     evidence_set = evidence_set - set(notch_evidences)
     random_choices = []
-    for i in range(5):
+    for i in range(n):
         choice = random.choice(list(evidence_set))
         random_choices.append(choice)
         evidence_set = evidence_set - set(choice)
