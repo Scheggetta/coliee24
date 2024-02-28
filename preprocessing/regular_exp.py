@@ -143,17 +143,26 @@ def regex_preprocessing(input_directory, output_directory):
     for file_name in os.listdir(input_directory):
         file_text = open(Path.joinpath(Path(input_directory), Path(file_name))).read()
 
-        # TODO: refactor with a single function
-        processed_file = remove_end_file(file_text)
-        processed_file = remove_year_brackets(processed_file)
-        processed_file = remove_editor_name(processed_file)
-        processed_file = remove_suppressed_pattern(processed_file)  # if switch else sub_multiple_suppressed_pattern(processed_file)
-        processed_file = remove_multiple_ellipsis(processed_file)
-        processed_file = remove_non_ascii(processed_file)
-        processed_file = remove_multiple_new_lines(processed_file)
+        preprocessed_file = remove_multiple_alien_topics(file_text)
+        preprocessed_file = remove_end_file(preprocessed_file)
+        preprocessed_file = remove_multiple_spaces(preprocessed_file)
+        preprocessed_file = remove_emphasis_added_tag(preprocessed_file)
+        preprocessed_file = replace_acronyms(preprocessed_file)
+        preprocessed_file = remove_redacted_tag(preprocessed_file)
+        preprocessed_file = remove_references(preprocessed_file)
+        preprocessed_file = remove_reported_typos(preprocessed_file)
+        preprocessed_file = correct_known_typos(preprocessed_file)
+        preprocessed_file = remove_bracket_ellipses(preprocessed_file)
+        preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file)
+        preprocessed_file = remove_year_brackets(preprocessed_file)
+        preprocessed_file = remove_editor_name(preprocessed_file)
+        preprocessed_file = remove_suppressed_pattern(preprocessed_file)
+        preprocessed_file = remove_multiple_ellipsis(preprocessed_file)
+        preprocessed_file = remove_non_ascii(preprocessed_file)
+        preprocessed_file = remove_multiple_new_lines(preprocessed_file)
 
         with open(Path.joinpath(Path(output_directory), Path(file_name)), 'w') as file:
-            file.write(processed_file)
+            file.write(preprocessed_file)
 
 
 def regex_preprocessing_single_file(filepath):
@@ -181,11 +190,14 @@ def regex_preprocessing_single_file(filepath):
 
 
 if __name__ == '__main__':
-    filename = '038307.txt'  # '000127.txt' #
-    dataset_to_preprocess = 'train'  # Possible values: 'train', 'test'
-    filepath = Path.joinpath(Path(Path(__file__).parent.parent),
-                             Path(f'Dataset/task1_{dataset_to_preprocess}_files_2024/{filename}'))
-    preprocessed_file = regex_preprocessing_single_file(filepath)
-
-    print(preprocessed_file)
-    pass
+    # filename = '038307.txt'  # '000127.txt' #
+    # dataset_to_preprocess = 'train'  # Possible values: 'train', 'test'
+    # filepath = Path.joinpath(Path(Path(__file__).parent.parent),
+    #                          Path(f'Dataset/task1_{dataset_to_preprocess}_files_2024/{filename}'))
+    # preprocessed_file = regex_preprocessing_single_file(filepath)
+    #
+    # print(preprocessed_file)
+    # pass
+    input_directory = '../Dataset/task1_train_files_2024'
+    output_directory = '../Dataset/regex_preprocessed_train'
+    regex_preprocessing(input_directory, output_directory)

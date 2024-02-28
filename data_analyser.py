@@ -12,10 +12,26 @@ import pandas as pd
 from lingua import Language, LanguageDetectorBuilder
 from argostranslate import package, translate
 import re
+import shutil
 
 pd.set_option('display.max_columns', None)
 package.install_from_path('fr_en.argosmodel')
 
+
+def split_queries_evidences():
+    file = open("Dataset/task1_train_labels_2024.json")
+    dict = json.load(file)
+    os.mkdir('Dataset/Train_Queries_regex')
+    for f in dict.keys():
+        if Path.joinpath(Path("Dataset/regex_preprocessed_train"), Path(f)).exists():
+            shutil.copy(Path.joinpath(Path("Dataset/regex_preprocessed_train"), Path(f)),
+                        Path.joinpath(Path('Dataset/Train_Queries_regex'), Path(f)))
+    os.mkdir('Dataset/Train_Evidence_regex')
+    for l in dict.values():
+        for f in l:
+            if Path.joinpath(Path("Dataset/regex_preprocessed_train"), Path(f)).exists():
+                shutil.copy(Path.joinpath(Path("Dataset/regex_preprocessed_train"), Path(f)),
+                            Path.joinpath(Path('Dataset/Train_Evidence_regex'), Path(f)))
 
 def get_tokenizer():
     return RegexpTokenizer(r'[a-zA-Z]\w+')
@@ -213,42 +229,48 @@ def get_bracket_freqs_dataset(directory='Dataset/task1_train_files_2024'):
 
 
 if __name__ == '__main__':
-    freqs = get_bracket_freqs_dataset()
-    print(freqs)
-    quit(0)
+    # freqs = get_bracket_freqs_dataset()
+    # print(freqs)
+    # quit(0)
     # to_be_trad = Path.joinpath(Path('Dataset/Train_Queries'), Path(os.listdir('Dataset/Train_Queries')[0]))
     # print(*compare_french_english_script(to_be_trad), sep='\n')
     # quit(0)
     # files_french_perc_q, dataset_french_perc_q = get_french_percentage()
     # files_french_perc_e, dataset_french_perc_e = get_french_percentage(False)
     # quit(0)
+    preprocessed = False
+    dataset_folder = 'Dataset/regex_preprocessed_train' if preprocessed else 'Dataset/task1_train_files_2024'
+    query_folder = 'Dataset/Train_Queries_regex' if preprocessed else 'Dataset/Train_Queries'
+    evidence_folder = 'Dataset/Train_Evidence_regex' if preprocessed else 'Dataset/Train_Evidence'
+    if not (Path(query_folder).exists() and Path(evidence_folder).exists()):
+        split_queries_evidences()
     freq_threshold = 500
     general_vocabulary = get_directory_vocabulary()
     iou_dict = dict()
     cos_sim = dict()
     kl_div_dict = dict()
-    for query in os.listdir('Dataset/Train_Queries'):
+    for query in os.listdir(query_folder):
         evidences = get_evidences(query)
-        vocab_query = get_file_vocabulary(f'Dataset/Train_Queries/{query}')
+        vocab_query = get_file_vocabulary(f'{query_folder}/{query}')
         for evidence in evidences:
             # file_freqs = compare_file_freqs(general_vocabulary, f'Dataset/Train_Queries/{file}', f'Dataset/Train_Evidence/{evidence}')
             # compare vocabularies
-            if Path.joinpath(Path("Dataset/Train_Evidence"), Path(evidence)).exists():
-                vocab_evidence = get_file_vocabulary(f'Dataset/Train_Evidence/{evidence}')
+            if Path.joinpath(Path(evidence_folder), Path(evidence)).exists():
+                vocab_evidence = get_file_vocabulary(f'{evidence_folder}/{evidence}')
                 iou_dict[(query, evidence, 'ev')] = compare_documents(vocab_query, vocab_evidence)
-                cos_sim[(query, evidence, 'ev')] = compute_cosine_similarity(general_vocabulary, get_file_words_frequency(f'Dataset/Train_Queries/{query}', freq_threshold), get_file_words_frequency(f'Dataset/Train_Evidence/{evidence}', freq_threshold))[0][0]
-                kl_div_dict[(query, evidence, 'ev')] = compare_file_freqs(general_vocabulary, f'Dataset/Train_Queries/{query}', f'Dataset/Train_Evidence/{evidence}')
+                cos_sim[(query, evidence, 'ev')] = compute_cosine_similarity(general_vocabulary, get_file_words_frequency(f'{query_folder}/{query}', freq_threshold), get_file_words_frequency(f'{evidence_folder}/{evidence}', freq_threshold))[0][0]
+                kl_div_dict[(query, evidence, 'ev')] = compare_file_freqs(general_vocabulary, f'{query_folder}/{query}', f'{evidence_folder}/{evidence}')
             else:
                 iou_dict[(query, evidence, 'ev')] = 'not found'
                 cos_sim[(query, evidence, 'ev')] = 'not found'
                 kl_div_dict[(query, evidence, 'ev')] = 'not found'
         random_evidence = pick_random_evidence(evidences)
         for evidence in random_evidence:
-            if Path.joinpath(Path("Dataset/Train_Evidence"), Path(evidence)).exists():
-                vocab_evidence = get_file_vocabulary(f'Dataset/Train_Evidence/{evidence}')
+            if Path.joinpath(Path(evidence_folder), Path(evidence)).exists():
+                vocab_evidence = get_file_vocabulary(f'{evidence_folder}/{evidence}')
                 iou_dict[(query, evidence, 're')] = compare_documents(vocab_query, vocab_evidence)
-                cos_sim[(query, evidence, 're')] = compute_cosine_similarity(general_vocabulary, get_file_words_frequency(f'Dataset/Train_Queries/{query}', freq_threshold), get_file_words_frequency(f'Dataset/Train_Evidence/{evidence}', freq_threshold))[0][0]
-                kl_div_dict[(query, evidence, 're')] = compare_file_freqs(general_vocabulary, f'Dataset/Train_Queries/{query}', f'Dataset/Train_Evidence/{evidence}')
+                cos_sim[(query, evidence, 're')] = compute_cosine_similarity(general_vocabulary, get_file_words_frequency(f'{query_folder}/{query}', freq_threshold), get_file_words_frequency(f'{evidence_folder}/{evidence}', freq_threshold))[0][0]
+                kl_div_dict[(query, evidence, 're')] = compare_file_freqs(general_vocabulary, f'{query_folder}/{query}', f'{evidence_folder}/{evidence}')
             else:
                 iou_dict[(query, evidence, 're')] = 'not found'
                 cos_sim[(query, evidence, 're')] = 'not found'
@@ -260,7 +282,7 @@ if __name__ == '__main__':
     average_cos_sim_random_evidences = []
     average_kl_div_evidences = []
     average_kl_div_random_evidences = []
-    for query in os.listdir('Dataset/Train_Queries'):
+    for query in os.listdir(query_folder):
         average_iou_evidences.append(np.array([iou_dict[q, e, bool_ev] for q, e, bool_ev in iou_dict.keys() if q == query and bool_ev == 'ev' and iou_dict[q, e, bool_ev] != 'not found']).mean())
         average_iou_random_evidences.append(np.array([iou_dict[q, e, bool_ev] for q, e, bool_ev in iou_dict.keys() if q == query and bool_ev == 're' and iou_dict[q, e, bool_ev] != 'not found']).mean())
         average_cos_sim_evidences.append(np.array([cos_sim[q, e, bool_ev] for q, e, bool_ev in cos_sim.keys() if q == query and bool_ev == 'ev' and cos_sim[q, e, bool_ev] != 'not found']).mean())
