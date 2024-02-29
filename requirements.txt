@@ -16,7 +16,7 @@ pyYAML
 gdown
 
 nltk
-lingua-language-detector
 argostranslate
 tiktoken
 openai
+lingua-language-detector

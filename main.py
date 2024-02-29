@@ -5,88 +5,50 @@ import json
 import os
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
-import shutil
+import copy
 
 from memory_profile import total_size
 from model import Model
-from functools import reduce
 
+import utils
 
-def check_queries_evidences_split():
-    fl = open("Dataset/task1_train_labels_2024.json")
-    js = json.load(fl)
-    evidence_list = reduce(lambda x,y: x+y, js.values())
-    return all([Path.joinpath(Path('Dataset/Train_Evidence'), Path(f)).exists() for f in evidence_list])
-
-
-if not (Path('Dataset/Train_Queries').exists() and Path('Dataset/Train_Evidence').exists()):
-    print("Separating Dataset...")
-    file = open("Dataset/task1_train_labels_2024.json")
-    dict = json.load(file)
-    os.mkdir('Dataset/Train_Queries')
-    for f in dict.keys():
-        if Path.joinpath(Path("Dataset/task1_train_files_2024"), Path(f)).exists():
-            shutil.copy(Path.joinpath(Path("Dataset/task1_train_files_2024"), Path(f)),
-                        Path.joinpath(Path('Dataset/Train_Queries'), Path(f)))
-    os.mkdir('Dataset/Train_Evidence')
-    for l in dict.values():
-        for f in l:
-            if Path.joinpath(Path("Dataset/task1_train_files_2024"), Path(f)).exists():
-                shutil.copy(Path.joinpath(Path("Dataset/task1_train_files_2024"), Path(f)),
-                            Path.joinpath(Path('Dataset/Train_Evidence'), Path(f)))
-
-
-
-# q = (1, 2, 3)
-# e = (2, 3, 3)
-# q = torch.Tensor([[[1, 2, 1], [1, 2, 1]]])
-# e = torch.Tensor([[[-1, 2, 3], [-2, -1, 1], [0, 0, 1]], [[-1, -1, -1], [0, -1, 1], [0, 0, 0]]])
-# x = torch.matmul(q, torch.transpose(e, 1, 2))
-#
-# x2 = torch.einsum('ijk,lmk->jlm', [q, e])
-#
-# q = torch.rand(1, 512, 768)
-# e = torch.rand(10, 512, 768)
-# x = torch.matmul(q, torch.transpose(e, 1, 2))
-# x2 = torch.einsum('ijk,ljk->l', [q, e])
-#
-# q = torch.rand(1, 512, 768)
-# e = torch.rand(10, 512, 768)
-# q = torch.mean(q, dim=1)
-# e = torch.mean(e, dim=1)
-# cos = torch.nn.CosineSimilarity()
-# x = cos(q, e)
-#
-# # q = (1, 5)
-# # e = (3, 5)
-# q = torch.Tensor([[1, 2, 3, 4, 5]])
-# attn = torch.Tensor([1, 1, 0, 0, 0])
-# q = q * attn
-# q = torch.squeeze(q)
-# e = torch.Tensor([[1, 2, -1, 4, -2], [1, -1, 3, 4, -1], [-1, -1, -1, -1, 5]])
-# x = torch.matmul(q, torch.transpose(e, 0, 1))
-# x = cos(q, e)
-
-
+utils.check_split()  # Checking if the local dataset is split correctly
 
 Roby = AutoModel.from_pretrained('roberta-base')
 tokenizer = AutoTokenizer.from_pretrained('roberta-base')
-q_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Queries'), x)).read() for x in os.listdir('Dataset/Train_Queries')], padding=True, truncation=True, max_length=512, return_tensors='pt')
-e_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Evidence'), x)).read() for x in os.listdir('Dataset/Train_Evidence')], padding=True, truncation=True, max_length=512, return_tensors='pt')
+q_embed = tokenizer([open(Path.joinpath(Path('Dataset/Train_Queries'), x),
+                          encoding='utf-8').read() for x in os.listdir('Dataset/Train_Queries')],
+                    padding=True, truncation=True, max_length=512, return_tensors='pt')
 
+K = 1  # Number of employed queries, selected in appearing order
+batch_size = 256
+set_size = len(os.listdir('Dataset/Train_Evidence'))  # Total number of possible evidences
+q_embed = utils.take_first_k(q_embed, K)
+model = Model('roberta-base').to('cuda')
+scores = []  # Dictionaries with 'F1', 'precision', 'recall', 'n_guesses'
+for query_n in range(K):
+    print(f"Executing query n.{query_n + 1}")
+    query = copy.deepcopy(q_embed).to('cuda')  # transferring tensors to GPU
+    query['input_ids'] = query['input_ids'][query_n:query_n + 1].to('cuda')
+    query['attention_mask'] = query['attention_mask'][query_n:query_n + 1].to('cuda')
+    str_q = os.listdir('Dataset/Train_Queries')[query_n]
+    true_evidences = json.load(open('Dataset/task1_train_labels_2024.json'))[str_q]
+    res = np.array([])
 
-# print(len(os.listdir('Dataset/Train_Evidence')))
-# print(total_size(q_embed.data))
+    evidence = np.array(os.listdir('Dataset/Train_Evidence'))
+    np.random.shuffle(evidence)
+    for e_batch in range(set_size // batch_size + 1):
+        print(f'Loading evidences from n.{e_batch * batch_size}')
+        lim = (e_batch + 1) * batch_size if (e_batch + 1) * batch_size < set_size else -1
+        evidence_set = evidence[e_batch * batch_size: lim]
+        e_tokens = tokenizer([open(Path.joinpath(Path('Dataset/Train_Evidence'), x),
+                                   encoding='utf-8').read() for x in evidence_set],
+                             padding=True, truncation=True, max_length=512, return_tensors='pt').to('cuda')
+        similarities = model(query, e_tokens)
+        # print(np.array(similarities.cpu())[similarities.cpu() > 0.995])
+        res = np.append(res, np.array(evidence_set)[similarities.cpu() > 0.99])
+    print(f'Got {len(res)} results')
+    # print(res)
+    scores.append(utils.baseline_F1(res, np.array(true_evidences)))
 
-
-def take_first_k(embed, k):
-    # TODO: delete `encodings` list from `embed` to free memory
-    embed['input_ids'] = embed['input_ids'][:k]
-    embed['attention_mask'] = embed['attention_mask'][:k]
-    return embed
-
-q_embed = take_first_k(q_embed, 1)
-e_embed = take_first_k(e_embed, 10)
-model = Model('roberta-base')
-result = model(q_embed, e_embed)
-
+print(scores)
