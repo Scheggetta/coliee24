@@ -33,6 +33,7 @@ def split_queries_evidences():
                 shutil.copy(Path.joinpath(Path("Dataset/regex_preprocessed_train"), Path(f)),
                             Path.joinpath(Path('Dataset/Train_Evidence_regex'), Path(f)))
 
+
 def get_tokenizer():
     return RegexpTokenizer(r'[a-zA-Z]\w+')
 

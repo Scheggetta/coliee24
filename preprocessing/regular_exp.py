@@ -18,7 +18,7 @@ import re
 #   - [see footnote [0-9]] ----> DONE
 #   - [emphasis added] (all variations) ---> DONE
 #   - [sic] ---> DONE
-#   - adjust something_suppressed detection
+#   - adjust something_suppressed detection ----> DONE
 #   - [redacted] ----> DONE
 #   - [acronyms] -> acronyms such as ([IRPA] -> IRPA, [RPD] -> RPD) ----> DONE
 #   - [para. [0-9]*] ----> DONE
