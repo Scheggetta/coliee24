@@ -52,3 +52,16 @@ for query_n in range(K):
     scores.append(utils.baseline_F1(res, np.array(true_evidences)))
 
 print(scores)
+
+# TODO: consider of using a mixed approach (bag of words and embeddings) [select the most meaningful parts of the text and then use embeddings to compare them]
+#       Find a way to get the most meaningful parts of the text
+#       or use a mixed approach (embeddings and regex) [use regex to remove the most common parts of the text and then use embeddings to compare them]
+
+
+# how to find the most meaningful parts of the text:
+#   - use regex to remove the most common parts of the text (consider that too) [reason sentence-wise]
+#   - consider the sentences in which the intersection of the vocabularies is the highest (consider training a neural network to do that)
+#   - maybe consider a mixture of both:
+#       - consider the most common parts of the text in terms of sentences and take the percentage of similarity subset of the text
+#       - remove the most common parts of the text
+#       - compare the remaining part with the embeddings
