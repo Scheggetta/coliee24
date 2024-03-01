@@ -103,12 +103,3 @@ def regex_preprocessing(input_directory, output_directory):
         if (idx+1) % 100 == 0:
             print(f'Processed {idx+1} files')
             print(f'Elapsed time: {time.time() - start}')
-
-
-if __name__ == '__main__':
-    # processed_text = regex_preprocessing_single_file(Path('../Dataset/task1_train_files_2024/038307.txt'))
-    # print(processed_text)
-    # pass
-    input_directory = '../Dataset/task1_train_files_2024'
-    output_directory = '../Dataset/regex_preprocessed_train_bis'
-    regex_preprocessing(input_directory, output_directory)
