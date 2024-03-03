@@ -160,12 +160,12 @@ def get_french_percentage(query_dir_switch=True):
     return perc_list, dataset_french_perc
 
 
-def compare_french_english_script(path_to_file):
+def compare_french_english_script(path_to_file, output_path):
     languages = [Language.ENGLISH, Language.FRENCH]
     detector = LanguageDetectorBuilder.from_languages(*languages).build()
     installed_languages = translate.get_installed_languages()
     translation_fr_en = installed_languages[1].get_translation(installed_languages[0])
-    file_french_translations = []
+    text = ''
     with open(path_to_file, 'r', encoding='utf-8') as f:
         text = f.read()
         french_to_translate = detector.detect_multiple_languages_of(text)
@@ -174,9 +174,13 @@ def compare_french_english_script(path_to_file):
                 french_text = text[lan.start_index:lan.end_index]
                 translated_text = translation_fr_en.translate(french_text)
                 if translated_text != french_text:
-                    file_french_translations.append((french_text, translated_text))
-    return file_french_translations
-    # pitfalls: the language detection is a hard tarsk because we are with English and French which are very similar.
+                    text = text[:lan.start_index] + translated_text + text[lan.end_index:]
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+
+
+    # pitfalls: the language detection is a hard task because we are with English and French which are very similar.
     # Moreover, both the language detector and translation tool are robust enough to take account of several kind of typos
     # then sometimes the translation is affected by the fact that the detection tool takes classifies English sentence as French
 
@@ -274,9 +278,13 @@ def analyse_dataset(dataset_folder, query_folder, evidence_folder, freq_threshol
                                        'average_kl_div_random_evidences': avg_kl_div_re_list})
 
 
-
 # TODO: Translate the queries and the evidence files to a common language (English)
 # TODO: Determine the English/French ratio in the dataset
 # TODO: Determine if the French sentences are the translation of the English ones
 
-
+# You cannot stop me, I will write here
+os.makedirs('Dataset/translated_preprocessed_train', exist_ok=True)
+for filename in os.listdir('Dataset/regex_preprocessed_train'):
+    print(filename)
+    compare_french_english_script(Path.joinpath(Path('Dataset/regex_preprocessed_train'), Path(filename)),
+                                  Path.joinpath(Path('Dataset/translated_preprocessed_train'), Path(filename)))

@@ -103,3 +103,13 @@ def regex_preprocessing(input_directory, output_directory):
         if (idx+1) % 100 == 0:
             print(f'Processed {idx+1} files')
             print(f'Elapsed time: {time.time() - start}')
+
+
+for filename in os.listdir('../Dataset/regex_preprocessed_train')[:10]:
+    path = Path.joinpath(Path('../Dataset/regex_preprocessed_train'), Path(filename))
+    file = open(path, 'r', encoding='utf-8')
+    text = file.read()
+    preprocessed_text = re.sub(r'\((.|\n)*?\)', '', text, flags=re.IGNORECASE)
+    file.close()
+    with open(path, 'w', encoding='utf-8') as file:
+        file.write(preprocessed_text)
