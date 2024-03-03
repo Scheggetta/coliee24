@@ -190,7 +190,7 @@ def embed_text_gpt(filepath, file_name, output_directory):
                 count -= MAX_EMBED_INPUT
                 iteration += 1
 
-    client = OpenAI(api_key='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')
+    client = OpenAI(api_key='SEGRETO :)')
     embed = []
     for call in text_calls:
         embed += client.embeddings.create(input=[call], model='text-embedding-3-small').data[0].embedding
