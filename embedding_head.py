@@ -20,8 +20,8 @@ torch.manual_seed(seed)
 
 
 EMB_IN = 1536
-EMB_OUT = 3
-SAMPLE_SIZE = 2
+EMB_OUT = 50
+SAMPLE_SIZE = 15
 TEMPERATURE = 1.0
 
 
@@ -70,7 +70,8 @@ class TrainingDataset(Dataset):
         self.json_dict = json_dict
 
         queries_names = [key for key in json_dict if key in embeddings]
-        self.all_evidences = SetList([evidence for query_name in queries_names for evidence in json_dict[query_name]])
+        # TODO: fix the reproducibility issue of set
+        self.all_evidences = set([evidence for query_name in queries_names for evidence in json_dict[query_name]])
 
         self.queries = []
         for q_name in queries_names:
@@ -95,7 +96,7 @@ class TrainingDataset(Dataset):
 
         excluded_documents = evidence_names.copy()
         excluded_documents.append(query_name)
-        excluded_documents = SetList(excluded_documents)
+        excluded_documents = set(excluded_documents)
 
         sample_space = self.all_evidences - excluded_documents
 
@@ -103,7 +104,7 @@ class TrainingDataset(Dataset):
         # for i in range(SAMPLE_SIZE):
         #     idx = torch.randint(0, len(sample_space), (1,)).item()
         #     el = ...
-        negative_evidences_names = random.sample(sample_space, SAMPLE_SIZE)
+        negative_evidences_names = random.sample(list(sample_space), SAMPLE_SIZE)
 
         negative_evidences = torch.empty((0, EMB_IN))
         for e_name in negative_evidences_names:
@@ -128,32 +129,42 @@ class QueryDataset(Dataset):
 
 
 class DocumentDataset(Dataset):
-    def __init__(self, embeddings: dict):
+    def __init__(self, embeddings: dict, json_dict: dict):
         self.embeddings_dict = embeddings
+        self.json_dict = json_dict
+
         self.embeddings = []
-        self.masked_element = None
+        self.masked_query = None
+        self.masked_evidences = None
+
         for key in embeddings:
             self.embeddings.append((key, embeddings[key]))
 
     def __len__(self):
         return len(self.embeddings)
 
-    def mask(self, element_name):
-        if self.masked_element:
+    def mask(self, query_name):
+        if self.masked_query:
             raise ValueError('A document is already masked')
-        embedding = self.embeddings_dict[element_name]
-        self.masked_element = (element_name, embedding)
-        self.embeddings.remove((element_name, embedding))
+        q_embedding = self.embeddings_dict[query_name]
+        self.masked_evidences = self.json_dict[query_name]
+
+        self.masked_query = (query_name, q_embedding)
+        self.embeddings.remove((query_name, q_embedding))
 
     def restore(self):
-        if self.masked_element:
-            self.embeddings.append(self.masked_element)
-            self.masked_element = None
+        if self.masked_query:
+            self.embeddings.append(self.masked_query)
+            self.masked_query = None
+            self.masked_evidences = None
         else:
             raise ValueError('No element to restore')
 
     def __getitem__(self, index):
-        return self.embeddings[index][1]
+        return self.embeddings[index]
+
+    def get_indexes(self, filenames):
+        return [self.embeddings.index((x, self.embeddings_dict[x])) for x in filenames]
 
 
 def custom_collate_fn(batch: list):
@@ -164,32 +175,29 @@ def custom_collate_fn(batch: list):
     return queries, evidences, negative_evidences
 
 
-def get_gpt_embeddings(json_file: str, folder_path: str, selected_files: list = None):
-    files = os.listdir(folder_path)
-    if 'backup' in files:
-        files.remove('backup')
+def get_gpt_embeddings(folder_path: str, selected_dict: dict):
     embeddings = {}
 
-    json_dict: dict[list[str]] = json.load(open(json_file))
+    files = []
+    for key, values in selected_dict.items():
+        files.append(key)
+        files.extend(values)
+    files = SetList(files)
 
-    if selected_files:
-        files = [file for file in files if file in selected_files]
-        if not files:
-            raise ValueError('No valid files selected')
-        # Check if any selected evidence does not have a related query
-        for file in selected_files:
-            if file in json_dict:
-                # `file` is a query
-                evidences = json_dict[file]
-                assert any(evidence in files for evidence in evidences), f'No evidence for query {file}'
-            else:
-                # `file` is an evidence
-                found_query = False
-                for key in json_dict:
-                    if file in json_dict[key]:
-                        found_query = True
-                        break
-                assert found_query, f'No query for evidence {file}'
+    # Check if any selected evidence does not have a related query
+    for file in files:
+        if file in selected_dict:
+            # `file` is a query
+            evidences = selected_dict[file]
+            assert any(evidence in files for evidence in evidences), f'No evidence for query {file}'
+        else:
+            # `file` is an evidence
+            found_query = False
+            for key in selected_dict:
+                if file in selected_dict[key]:
+                    found_query = True
+                    break
+            assert found_query, f'No query for evidence {file}'
 
     for file in files:
         with open(os.path.join(folder_path, file), 'rb') as f:
@@ -200,15 +208,18 @@ def get_gpt_embeddings(json_file: str, folder_path: str, selected_files: list = 
             e = torch.tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
             embeddings[file] = e
 
-    return embeddings, json_dict
+    return embeddings
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
+    # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
+    # lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.05, total_iters=num_epochs)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, threshold=1e-3, patience=1,
+                                                              cooldown=1)
 
-    history = {}
+    history = {'train_loss': [], 'val_loss': []}
 
     model = model.to('cuda')
     best_model = model
@@ -218,10 +229,8 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
     for epoch in range(num_epochs):
         model.train(True)
 
-        running_loss = 0.0
         train_loss = 0.0
         i = 0
-
         for dl_row in train_dataloader:
             query, pe, ne = dl_row
 
@@ -238,39 +247,35 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
 
             optimizer.step()
 
-            running_loss += loss.item()
             train_loss += loss.item()
-
             i += 1
-            if i % 10 == 0:
-                pbar.set_description('[%d, %3d] loss: %.3f - lr: %.5f' % (epoch + 1, i, running_loss / 10, lr_scheduler.get_last_lr()[-1]))
-                pbar.update()
-                running_loss = 0.0
 
-        # train_loss /= i
-        # history['train_loss'].append(train_loss)
+        # lr_scheduler.step()
 
-        # evaluate the model on the validation set
-        # print('Evaluating the model on the validation set...')
-        # vloss, macro_f1_score, class_f1_score, _, _, _ = evaluate_model(model, validation_dataloader, device)
-        # history['val_loss'].append(vloss)
-        # history['val_macro_f1'].append(macro_f1_score)
-        # history['val_class_f1'].append(class_f1_score)
+        train_loss /= i
+        lr_scheduler.step(train_loss)
+        history['train_loss'].append(train_loss)
 
-        lr_scheduler.step()
+        # Evaluate the model on the validation set
+        vloss = evaluate_model(model, validation_dataloader)
+        history['val_loss'].append(vloss)
+
+        pbar.set_description(
+            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {vloss[0]:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
+        pbar.update()
 
         # if macro_f1_score > history['best_val_macro_f1']:
         #     print('New best model found! Saving it...')
         #     history['best_val_macro_f1'] = macro_f1_score
         #     best_model = copy.deepcopy(model)
 
-    # history['val_class_f1'] = np.array(history['val_class_f1'])
     pbar.close()
     print('Finished Training\n')
     return best_model, history
 
 
 def compute_loss(query, pe, ne, loss_function, pe_weight=None):
+    # TODO: focal loss
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
 
     loss = torch.tensor(0.0).to('cuda')
@@ -293,40 +298,82 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
+def evaluate_model(model, validation_dataloader, pe_weight=None):
+    assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
+    model.eval()
+
+    q_dataloader, d_dataloader = validation_dataloader
+    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+
+    val_loss = 0.0
+    pe_val_loss = 0.0
+    ne_val_loss = 0.0
+    i = 0
+    with torch.no_grad():
+        for q_name, q_emb in q_dataloader:
+            d_dataloader.dataset.mask(q_name[0])
+            pe = d_dataloader.dataset.masked_evidences
+            pe_idxs = d_dataloader.dataset.get_indexes(pe)
+
+            for d_name, d_emb in d_dataloader:
+                q_emb = q_emb.to('cuda')
+                d_emb = d_emb.to('cuda')
+                query_out, doc_out = model(q_emb, doc=d_emb)
+
+                d_idxs = d_dataloader.dataset.get_indexes(d_name)
+                targets = torch.Tensor([1 if x in pe_idxs else -1 for x in d_idxs]).to('cuda')
+
+                pe = doc_out[targets == 1]
+                ne = doc_out[targets == -1]
+
+                val_loss += loss_function(query_out, doc_out, targets).mean()
+                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).mean()
+                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).mean()
+                i += 1
+
+            d_dataloader.dataset.restore()
+
+    val_loss /= i
+    pe_val_loss /= i
+    ne_val_loss /= i
+    if pe_weight is not None:
+        weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
+    else:
+        weighted_val_loss = None
+
+    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss
+
+
+def split_dataset(json_dict, split_ratio=0.9):
+    keys = list(json_dict.keys())
+    random.shuffle(keys)
+
+    train_size = ceil(len(json_dict) * split_ratio)
+    train_dict = {key: json_dict[key] for key in keys[:train_size]}
+    val_dict = {key: json_dict[key] for key in keys[train_size:]}
+
+    return train_dict, val_dict
+
+
 if __name__ == '__main__':
-    embeddings, json_dict = get_gpt_embeddings(json_file='Dataset/task1_train_labels_2024.json',
-                                               folder_path='Dataset/gpt_embed_train')
-    dataset = TrainingDataset(embeddings, json_dict)
-    dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=4, shuffle=False)
+    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
+    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
-    model = EmbeddingHead().to('cuda')
+    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+                                             selected_dict=train_dict)
+    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+                                               selected_dict=val_dict)
 
-    query_dataset = QueryDataset(embeddings, json_dict)
-    document_dataset = DocumentDataset(embeddings)
+    dataset = TrainingDataset(training_embeddings, train_dict)
+    training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
+
+    query_dataset = QueryDataset(validation_embeddings, val_dict)
+    document_dataset = DocumentDataset(validation_embeddings, val_dict)
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
+    model = EmbeddingHead().to('cuda')
 
-
-    # TODO: seed!!!
-    train(model, dataloader, None, 1)
-    quit()
-
-
-
-    for q_name, q_emb in q_dataloader:
-        d_dataloader.dataset.mask(q_name[0])
-        for dl_row in d_dataloader:
-            pass
-        d_dataloader.dataset.restore()
-
-    # for dl_row in dataloader:
-    #     query, pe, ne = dl_row
-    #
-    #     query = query.to('cuda')
-    #     pe = [x.to('cuda') for x in pe]
-    #     ne = ne.to('cuda')
-    #
-    #     pcs, ncs = model(query, pe, ne)
+    train(model, training_dataloader, (q_dataloader, d_dataloader), 20)
 
     print('done')
