@@ -3,6 +3,7 @@ import pickle
 import json
 import random
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
@@ -22,24 +23,37 @@ class EmbeddingHead(torch.nn.Module):
         self.cs_pe = torch.nn.CosineSimilarity(dim=1)
         self.cs_ne = torch.nn.CosineSimilarity(dim=2)
 
-    def forward(self, query, pe, ne):
-        # TODO: training and test inference are different
-        query = self.relu(self.linear1(query))
-        query = self.relu(self.linear2(query))
+    def forward(self, query, pe=None, ne=None, doc=None):
+        if self.training:
+            assert pe is not None and ne is not None, 'Positive and negative evidences must be provided during training'
 
-        pe = [self.relu(self.linear1(x)) for x in pe]
-        pe = [self.relu(self.linear2(x)) for x in pe]
+            query = self.relu(self.linear1(query))
+            query = self.linear2(query)
 
-        ne = self.relu(self.linear1(ne))
-        ne = self.relu(self.linear2(ne))
+            pe = [self.relu(self.linear1(x)) for x in pe]
+            pe = [self.linear2(x) for x in pe]
 
-        pcs = [self.cs_pe(query[idx], x) for idx, x in enumerate(pe)]
-        ncs = self.cs_ne(query.unsqueeze(1), ne)
+            ne = self.relu(self.linear1(ne))
+            ne = self.linear2(ne)
 
-        return pcs, ncs
+            pcs = [self.cs_pe(query[idx], x) for idx, x in enumerate(pe)]
+            ncs = self.cs_ne(query.unsqueeze(1), ne)
+
+            return pcs, ncs
+        else:
+            assert doc is not None, 'Document must be provided during inference'
+            query = self.relu(self.linear1(query))
+            query = self.linear2(query)
+
+            doc = self.relu(self.linear1(doc))
+            doc = self.linear2(doc)
+
+            cs = self.cs_pe(query, doc)
+
+            return cs
 
 
-class CustomDataset(Dataset):
+class TrainingDataset(Dataset):
     def __init__(self, embeddings: dict, json_dict: dict):
         self.embeddings = embeddings
         self.json_dict = json_dict
@@ -79,6 +93,50 @@ class CustomDataset(Dataset):
             negative_evidences = torch.cat((negative_evidences, self.embeddings[e_name].unsqueeze(0)), dim=0)
 
         return query, evidence, negative_evidences
+
+
+class QueryDataset(Dataset):
+    def __init__(self, embeddings: dict, json_dict: dict):
+        self.embeddings = embeddings
+        self.json_dict = json_dict
+
+        queries_names = [key for key in json_dict if key in embeddings]
+        self.queries = [(q_name, embeddings[q_name]) for q_name in queries_names]
+
+    def __len__(self):
+        return len(self.queries)
+
+    def __getitem__(self, index):
+        return self.queries[index]
+
+
+class DocumentDataset(Dataset):
+    def __init__(self, embeddings: dict):
+        self.embeddings_dict = embeddings
+        self.embeddings = []
+        self.masked_element = None
+        for key in embeddings:
+            self.embeddings.append((key, embeddings[key]))
+
+    def __len__(self):
+        return len(self.embeddings)
+
+    def mask(self, element_name):
+        if self.masked_element:
+            raise ValueError('A document is already masked')
+        embedding = self.embeddings_dict[element_name]
+        self.masked_element = (element_name, embedding)
+        self.embeddings.remove((element_name, embedding))
+
+    def restore(self):
+        if self.masked_element:
+            self.embeddings.append(self.masked_element)
+            self.masked_element = None
+        else:
+            raise ValueError('No element to restore')
+
+    def __getitem__(self, index):
+        return self.embeddings[index][1]
 
 
 def custom_collate_fn(batch: list):
@@ -128,21 +186,94 @@ def get_gpt_embeddings(json_file: str, folder_path: str, selected_files: list = 
     return embeddings, json_dict
 
 
+def train(model, train_dataloader, validation_dataloader, num_epochs):
+    optimizer = ...
+    loss_function = ...
+    lr_scheduler = ...
+
+    history = {}
+
+    best_model = ...
+
+    # TODO: use `tqdm`
+    for epoch in range(num_epochs):
+        print('Epoch %d/%d on model %s:' % (epoch + 1, num_epochs, model.name_))
+        model.train(True)
+        # running_loss = 0.0
+        # train_loss = 0.0
+        # i = 0
+        #
+        # for dl_row in train_dataloader:
+        #     feat, lab = dl_row
+        #
+        #     optimizer.zero_grad()
+        #
+        #     outputs = model(feat)
+        #
+        #     loss = loss_function(outputs, lab)
+        #     loss.backward()
+        #
+        #     optimizer.step()
+        #
+        #     running_loss += loss.item()
+        #     train_loss += loss.item()
+        #
+        #     i += 1
+        #     if i % 10 == 0:
+        #         print('[%d, %3d] loss: %.3f' % (epoch + 1, i, running_loss / 10))
+        #         running_loss = 0.0
+        #
+        # train_loss /= i
+        # history['train_loss'].append(train_loss)
+        #
+        # # evaluate the model on the validation set
+        # print('Evaluating the model on the validation set...')
+        # vloss, macro_f1_score, class_f1_score, _, _, _ = evaluate_model(model, validation_dataloader, device)
+        # history['val_loss'].append(vloss)
+        # history['val_macro_f1'].append(macro_f1_score)
+        # history['val_class_f1'].append(class_f1_score)
+        #
+        # lr_scheduler.step()
+        #
+        # if macro_f1_score > history['best_val_macro_f1']:
+        #     print('New best model found! Saving it...')
+        #     history['best_val_macro_f1'] = macro_f1_score
+        #     best_model = copy.deepcopy(model)
+
+    history['val_class_f1'] = np.array(history['val_class_f1'])
+
+    print('Finished Training\n')
+    return best_model, history
+
+
+
+
 if __name__ == '__main__':
     embeddings, json_dict = get_gpt_embeddings(json_file='Dataset/task1_train_labels_2024.json',
                                                folder_path='Dataset/gpt_embed_train')
-    dataset = CustomDataset(embeddings, json_dict)
+    dataset = TrainingDataset(embeddings, json_dict)
     dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=4, shuffle=False)
 
     model = EmbeddingHead().to('cuda')
 
-    for dl_row in dataloader:
-        query, pe, ne = dl_row
+    query_dataset = QueryDataset(embeddings, json_dict)
+    document_dataset = DocumentDataset(embeddings)
+    q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
+    d_dataloader = DataLoader(document_dataset, batch_size=4, shuffle=False)
 
-        query = query.to('cuda')
-        pe = [x.to('cuda') for x in pe]
-        ne = ne.to('cuda')
+    for q_name, q_emb in q_dataloader:
+        d_dataloader.dataset.mask(q_name[0])
+        for dl_row in d_dataloader:
+            pass
+        d_dataloader.dataset.restore()
 
-        pcs, ncs = model(query, pe, ne)
+    # for dl_row in dataloader:
+    #     query, pe, ne = dl_row
+    #
+    #     query = query.to('cuda')
+    #     pe = [x.to('cuda') for x in pe]
+    #     ne = ne.to('cuda')
+    #
+    #     pcs, ncs = model(query, pe, ne)
 
     print('done')
