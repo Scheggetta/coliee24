@@ -3,6 +3,7 @@ import pickle
 import json
 import random
 import copy
+from math import ceil
 
 import numpy as np
 import torch
@@ -205,14 +206,16 @@ def get_gpt_embeddings(json_file: str, folder_path: str, selected_files: list = 
 def train(model, train_dataloader, validation_dataloader, num_epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_epochs // 5, gamma=0.5)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
 
     history = {}
 
     model = model.to('cuda')
     best_model = model
 
-    for epoch in tqdm(range(num_epochs), desc='Training'):
+    pbar = tqdm(total=num_epochs, desc='Training')
+
+    for epoch in range(num_epochs):
         model.train(True)
 
         running_loss = 0.0
@@ -231,18 +234,17 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
             query_out, pe_out, ne_out = model(query, pe, ne)
 
             loss = compute_loss(query_out, pe_out, ne_out, loss_function)
-            pass
-            # loss = loss_function()
-            # loss.backward()
+            loss.backward()
 
-            # optimizer.step()
+            optimizer.step()
 
-            # running_loss += loss.item()
-            # train_loss += loss.item()
+            running_loss += loss.item()
+            train_loss += loss.item()
 
             i += 1
             if i % 10 == 0:
-                print('[%d, %3d] loss: %.3f' % (epoch + 1, i, running_loss / 10))
+                pbar.set_description('[%d, %3d] loss: %.3f - lr: %.5f' % (epoch + 1, i, running_loss / 10, lr_scheduler.get_last_lr()[-1]))
+                pbar.update()
                 running_loss = 0.0
 
         # train_loss /= i
@@ -256,7 +258,6 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
         # history['val_class_f1'].append(class_f1_score)
 
         lr_scheduler.step()
-        print('lr: ', lr_scheduler.get_last_lr())
 
         # if macro_f1_score > history['best_val_macro_f1']:
         #     print('New best model found! Saving it...')
@@ -264,12 +265,15 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
         #     best_model = copy.deepcopy(model)
 
     # history['val_class_f1'] = np.array(history['val_class_f1'])
-
+    pbar.close()
     print('Finished Training\n')
     return best_model, history
 
 
-def compute_loss(query, pe, ne, loss_function):
+def compute_loss(query, pe, ne, loss_function, pe_weight=None):
+    assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
+
+    loss = torch.tensor(0.0).to('cuda')
     for idx, query_el in enumerate(query):
         query_el = query_el.unsqueeze(0)
         pe_el = pe[idx]
@@ -278,7 +282,15 @@ def compute_loss(query, pe, ne, loss_function):
         pe_loss = loss_function(query_el, pe_el, torch.ones(1).to('cuda'))
         ne_loss = loss_function(query_el, ne_el, -torch.ones(1).to('cuda'))
 
-        pass
+        if pe_weight is None:
+            losses = torch.cat((pe_loss, ne_loss))
+            loss += losses.mean()
+        else:
+            pe_loss = pe_loss.mean()
+            ne_loss = ne_loss.mean()
+            loss += pe_weight * pe_loss + (1 - pe_weight) * ne_loss
+
+    return loss / len(query)
 
 
 if __name__ == '__main__':
@@ -292,7 +304,7 @@ if __name__ == '__main__':
     query_dataset = QueryDataset(embeddings, json_dict)
     document_dataset = DocumentDataset(embeddings)
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-    d_dataloader = DataLoader(document_dataset, batch_size=4, shuffle=False)
+    d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
 
 
