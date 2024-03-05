@@ -2,10 +2,20 @@ import os
 import pickle
 import json
 import random
+import copy
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+
+from setlist import SetList
+
+
+seed = 62
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
 
 
 EMB_IN = 1536
@@ -20,8 +30,8 @@ class EmbeddingHead(torch.nn.Module):
         self.linear1 = torch.nn.Linear(EMB_IN, 256)
         self.linear2 = torch.nn.Linear(256, EMB_OUT)
         self.relu = torch.nn.ReLU()
-        self.cs_pe = torch.nn.CosineSimilarity(dim=1)
-        self.cs_ne = torch.nn.CosineSimilarity(dim=2)
+        # self.cs_pe = torch.nn.CosineSimilarity(dim=1)
+        # self.cs_ne = torch.nn.CosineSimilarity(dim=2)
 
     def forward(self, query, pe=None, ne=None, doc=None):
         if self.training:
@@ -36,10 +46,10 @@ class EmbeddingHead(torch.nn.Module):
             ne = self.relu(self.linear1(ne))
             ne = self.linear2(ne)
 
-            pcs = [self.cs_pe(query[idx], x) for idx, x in enumerate(pe)]
-            ncs = self.cs_ne(query.unsqueeze(1), ne)
+            # pcs = [self.cs_pe(query[idx], x) for idx, x in enumerate(pe)]
+            # ncs = self.cs_ne(query.unsqueeze(1), ne)
 
-            return pcs, ncs
+            return query, pe, ne
         else:
             assert doc is not None, 'Document must be provided during inference'
             query = self.relu(self.linear1(query))
@@ -48,9 +58,9 @@ class EmbeddingHead(torch.nn.Module):
             doc = self.relu(self.linear1(doc))
             doc = self.linear2(doc)
 
-            cs = self.cs_pe(query, doc)
+            # cs = self.cs_pe(query, doc)
 
-            return cs
+            return query, doc
 
 
 class TrainingDataset(Dataset):
@@ -59,7 +69,7 @@ class TrainingDataset(Dataset):
         self.json_dict = json_dict
 
         queries_names = [key for key in json_dict if key in embeddings]
-        self.all_evidences = set([evidence for query_name in queries_names for evidence in json_dict[query_name]])
+        self.all_evidences = SetList([evidence for query_name in queries_names for evidence in json_dict[query_name]])
 
         self.queries = []
         for q_name in queries_names:
@@ -84,9 +94,15 @@ class TrainingDataset(Dataset):
 
         excluded_documents = evidence_names.copy()
         excluded_documents.append(query_name)
-        excluded_documents = set(excluded_documents)
+        excluded_documents = SetList(excluded_documents)
+
         sample_space = self.all_evidences - excluded_documents
-        negative_evidences_names = random.sample(list(sample_space), SAMPLE_SIZE)
+
+        # negative_evidences_names = []
+        # for i in range(SAMPLE_SIZE):
+        #     idx = torch.randint(0, len(sample_space), (1,)).item()
+        #     el = ...
+        negative_evidences_names = random.sample(sample_space, SAMPLE_SIZE)
 
         negative_evidences = torch.empty((0, EMB_IN))
         for e_name in negative_evidences_names:
@@ -187,65 +203,82 @@ def get_gpt_embeddings(json_file: str, folder_path: str, selected_files: list = 
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs):
-    optimizer = ...
-    loss_function = ...
-    lr_scheduler = ...
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_epochs // 5, gamma=0.5)
 
     history = {}
 
-    best_model = ...
+    model = model.to('cuda')
+    best_model = model
 
-    # TODO: use `tqdm`
-    for epoch in range(num_epochs):
-        print('Epoch %d/%d on model %s:' % (epoch + 1, num_epochs, model.name_))
+    for epoch in tqdm(range(num_epochs), desc='Training'):
         model.train(True)
-        # running_loss = 0.0
-        # train_loss = 0.0
-        # i = 0
-        #
-        # for dl_row in train_dataloader:
-        #     feat, lab = dl_row
-        #
-        #     optimizer.zero_grad()
-        #
-        #     outputs = model(feat)
-        #
-        #     loss = loss_function(outputs, lab)
-        #     loss.backward()
-        #
-        #     optimizer.step()
-        #
-        #     running_loss += loss.item()
-        #     train_loss += loss.item()
-        #
-        #     i += 1
-        #     if i % 10 == 0:
-        #         print('[%d, %3d] loss: %.3f' % (epoch + 1, i, running_loss / 10))
-        #         running_loss = 0.0
-        #
+
+        running_loss = 0.0
+        train_loss = 0.0
+        i = 0
+
+        for dl_row in train_dataloader:
+            query, pe, ne = dl_row
+
+            query = query.to('cuda')
+            pe = [x.to('cuda') for x in pe]
+            ne = ne.to('cuda')
+
+            optimizer.zero_grad()
+
+            query_out, pe_out, ne_out = model(query, pe, ne)
+
+            loss = compute_loss(query_out, pe_out, ne_out, loss_function)
+            pass
+            # loss = loss_function()
+            # loss.backward()
+
+            # optimizer.step()
+
+            # running_loss += loss.item()
+            # train_loss += loss.item()
+
+            i += 1
+            if i % 10 == 0:
+                print('[%d, %3d] loss: %.3f' % (epoch + 1, i, running_loss / 10))
+                running_loss = 0.0
+
         # train_loss /= i
         # history['train_loss'].append(train_loss)
-        #
-        # # evaluate the model on the validation set
+
+        # evaluate the model on the validation set
         # print('Evaluating the model on the validation set...')
         # vloss, macro_f1_score, class_f1_score, _, _, _ = evaluate_model(model, validation_dataloader, device)
         # history['val_loss'].append(vloss)
         # history['val_macro_f1'].append(macro_f1_score)
         # history['val_class_f1'].append(class_f1_score)
-        #
-        # lr_scheduler.step()
-        #
+
+        lr_scheduler.step()
+        print('lr: ', lr_scheduler.get_last_lr())
+
         # if macro_f1_score > history['best_val_macro_f1']:
         #     print('New best model found! Saving it...')
         #     history['best_val_macro_f1'] = macro_f1_score
         #     best_model = copy.deepcopy(model)
 
-    history['val_class_f1'] = np.array(history['val_class_f1'])
+    # history['val_class_f1'] = np.array(history['val_class_f1'])
 
     print('Finished Training\n')
     return best_model, history
 
 
+def compute_loss(query, pe, ne, loss_function):
+    for idx, query_el in enumerate(query):
+        query_el = query_el.unsqueeze(0)
+        pe_el = pe[idx]
+        ne_el = ne[idx]
+
+        pe_loss = loss_function(query_el, pe_el, torch.ones(1).to('cuda'))
+        ne_loss = loss_function(query_el, ne_el, -torch.ones(1).to('cuda'))
+
+        pass
 
 
 if __name__ == '__main__':
@@ -260,6 +293,14 @@ if __name__ == '__main__':
     document_dataset = DocumentDataset(embeddings)
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=4, shuffle=False)
+
+
+
+    # TODO: seed!!!
+    train(model, dataloader, None, 1)
+    quit()
+
+
 
     for q_name, q_emb in q_dataloader:
         d_dataloader.dataset.mask(q_name[0])
