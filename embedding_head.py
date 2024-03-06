@@ -4,6 +4,7 @@ import json
 import random
 import copy
 from math import ceil
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -11,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 from setlist import SetList
+from datetime import datetime
 
 
 seed = 62
@@ -23,6 +25,7 @@ EMB_IN = 1536
 EMB_OUT = 50
 SAMPLE_SIZE = 15
 TEMPERATURE = 1.0
+PE_WEIGHT = 0.9
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -31,8 +34,8 @@ class EmbeddingHead(torch.nn.Module):
         self.linear1 = torch.nn.Linear(EMB_IN, 256)
         self.linear2 = torch.nn.Linear(256, EMB_OUT)
         self.relu = torch.nn.ReLU()
-        # self.cs_pe = torch.nn.CosineSimilarity(dim=1)
-        # self.cs_ne = torch.nn.CosineSimilarity(dim=2)
+        self.cs = torch.nn.CosineSimilarity(dim=1)
+        # self.cs = torch.nn.CosineSimilarity(dim=2)
 
     def forward(self, query, pe=None, ne=None, doc=None):
         if self.training:
@@ -62,6 +65,16 @@ class EmbeddingHead(torch.nn.Module):
             # cs = self.cs_pe(query, doc)
 
             return query, doc
+
+    def save_weights(self):
+        os.makedirs('Checkpoints', exist_ok=True)
+        now = datetime.now()
+        file_path = Path.joinpath(Path('Checkpoints'), Path(f'weights_{now.strftime("%d_%m_%H-%M-%S")}.pt'))
+        torch.save(self.state_dict(), file_path)
+
+    def load_weights(self, file_path: Path):
+        assert file_path.exists(), f'No weights found in {str(file_path)}'
+        self.load_state_dict(torch.load(file_path))
 
 
 class TrainingDataset(Dataset):
@@ -211,21 +224,21 @@ def get_gpt_embeddings(folder_path: str, selected_dict: dict):
     return embeddings
 
 
-def train(model, train_dataloader, validation_dataloader, num_epochs):
+def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
     # lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.05, total_iters=num_epochs)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, threshold=1e-3, patience=1,
-                                                              cooldown=1)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.2, threshold=1e-3, patience=1,
+                                                              cooldown=3)
 
     history = {'train_loss': [], 'val_loss': []}
 
     model = model.to('cuda')
-    best_model = model
 
     pbar = tqdm(total=num_epochs, desc='Training')
 
+    best_weights = model.state_dict()
     for epoch in range(num_epochs):
         model.train(True)
 
@@ -242,7 +255,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
-            loss = compute_loss(query_out, pe_out, ne_out, loss_function)
+            loss = compute_loss(query_out, pe_out, ne_out, loss_function, PE_WEIGHT)
             loss.backward()
 
             optimizer.step()
@@ -253,25 +266,30 @@ def train(model, train_dataloader, validation_dataloader, num_epochs):
         # lr_scheduler.step()
 
         train_loss /= i
-        lr_scheduler.step(train_loss)
         history['train_loss'].append(train_loss)
 
         # Evaluate the model on the validation set
-        vloss = evaluate_model(model, validation_dataloader)
-        history['val_loss'].append(vloss)
+        v_losses = evaluate_model(model, validation_dataloader, pe_weight=PE_WEIGHT)
+        val_loss = v_losses[1] if v_losses[1] else v_losses[0]
+        history['val_loss'].append(val_loss)
 
+        lr_scheduler.step(train_loss)
         pbar.set_description(
-            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {vloss[0]:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
+            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
         pbar.update()
 
-        # if macro_f1_score > history['best_val_macro_f1']:
-        #     print('New best model found! Saving it...')
-        #     history['best_val_macro_f1'] = macro_f1_score
-        #     best_model = copy.deepcopy(model)
+        if save_weights:
+            if epoch == 0 or val_loss < min(history['val_loss'][:-1]):
+                # print(f'New best model found (val_loss = {val_loss})! Saving it...')
+                best_weights = model.state_dict()
+
+    if save_weights:
+        model.load_state_dict(best_weights)
+        model.save_weights()
 
     pbar.close()
     print('Finished Training\n')
-    return best_model, history
+    return history
 
 
 def compute_loss(query, pe, ne, loss_function, pe_weight=None):
@@ -308,7 +326,9 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
     val_loss = 0.0
     pe_val_loss = 0.0
     ne_val_loss = 0.0
-    i = 0
+    pe_count = 0
+    ne_count = 0
+
     with torch.no_grad():
         for q_name, q_emb in q_dataloader:
             d_dataloader.dataset.mask(q_name[0])
@@ -324,18 +344,19 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
                 targets = torch.Tensor([1 if x in pe_idxs else -1 for x in d_idxs]).to('cuda')
 
                 pe = doc_out[targets == 1]
+                pe_count += len(pe)
                 ne = doc_out[targets == -1]
+                ne_count += len(ne)
 
-                val_loss += loss_function(query_out, doc_out, targets).mean()
-                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).mean()
-                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).mean()
-                i += 1
+                val_loss += loss_function(query_out, doc_out, targets).sum()
+                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
+                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
 
             d_dataloader.dataset.restore()
 
-    val_loss /= i
-    pe_val_loss /= i
-    ne_val_loss /= i
+    val_loss /= (pe_count + ne_count)
+    pe_val_loss /= pe_count
+    ne_val_loss /= ne_count
     if pe_weight is not None:
         weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
     else:
@@ -353,6 +374,32 @@ def split_dataset(json_dict, split_ratio=0.9):
     val_dict = {key: json_dict[key] for key in keys[train_size:]}
 
     return train_dict, val_dict
+
+
+def predict(model, q_dataloader, d_dataloader):
+    model.eval()
+    results = {}
+    GT = {}
+    for q_name, q_emb in q_dataloader:
+        d_dataloader.dataset.mask(q_name[0])
+        pe = d_dataloader.dataset.masked_evidences
+        pe_idxs = d_dataloader.dataset.get_indexes(pe)
+        q_emb = q_emb.to('cuda')
+
+        results[q_name] = []
+        GT[q_name] = []
+        for d_name, d_emb in d_dataloader:
+            d_emb = d_emb.to('cuda')
+            d_idxs = d_dataloader.dataset.get_indexes(d_name)
+            query_out, doc_out = model(q_emb, doc=d_emb)
+
+            similarities = [model.cs(query_out, x.unsqueeze(0)) for x in doc_out]
+            results[q_name] += [1 if similarities[n] > 0 else 0 for n in range(len(similarities))]
+            GT[q_name] += torch.Tensor([1 if x in pe_idxs else -1 for x in d_idxs])
+
+        d_dataloader.dataset.restore()
+
+    return results, GT
 
 
 if __name__ == '__main__':
@@ -374,6 +421,12 @@ if __name__ == '__main__':
 
     model = EmbeddingHead().to('cuda')
 
-    train(model, training_dataloader, (q_dataloader, d_dataloader), 20)
+    train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
+
+    # model.load_weights(Path('Checkpoints/weights_06_03_18-15-27.pt'))
+    res, GT = predict(model, q_dataloader, d_dataloader)
+    sample = list(res.keys())[0]
+    print(res[sample])
+    print(GT[sample])
 
     print('done')
