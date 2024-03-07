@@ -1,3 +1,5 @@
+PREPROCESSING_DATASET_TYPE = 'train'  # 'train' or 'test'
+
 EMB_IN = 1536
 EMB_OUT = 50           # 50
 SAMPLE_SIZE = 15       # 15

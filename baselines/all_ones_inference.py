@@ -21,13 +21,13 @@ WHOLE_DATASET = False
 
 
 if __name__ == '__main__':
-    json_dict = json.load(open('../Dataset/task1_train_labels_2024.json'))
+    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
     train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
-    embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train', selected_dict=json_dict)
-    training_embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train',
+    embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train', selected_dict=json_dict)
+    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
                                              selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train',
+    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
                                                selected_dict=val_dict)
 
     # dataset = TrainingDataset(training_embeddings, train_dict)

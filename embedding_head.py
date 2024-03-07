@@ -1,7 +1,6 @@
 import os
 import json
 import random
-from math import ceil
 from pathlib import Path
 from datetime import datetime
 
@@ -18,7 +17,6 @@ from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_colla
 # TODO:
 #  - focal loss
 #  - hyperparameter grid search
-#  - alternative model architecture
 
 
 seed = 62
@@ -74,9 +72,6 @@ class EmbeddingHead(torch.nn.Module):
     def load_weights(self, file_path: Path):
         assert file_path.exists(), f'No weights found in {str(file_path)}'
         self.load_state_dict(torch.load(file_path))
-
-
-
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True):
@@ -150,7 +145,6 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
 
 def compute_loss(query, pe, ne, loss_function, pe_weight=None):
-    # TODO: focal loss
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
 
     loss = torch.tensor(0.0).to('cuda')
