@@ -44,7 +44,7 @@ def remove_tags_from_regex(text):
                            r'((\.\s{0,}){4,})',
                            r'[^\u0000-\u007E\u00A1-\u00AC\u00AE-\u01FF]',
                            r'[\[<(]?[ \t]*\w*_suppressed[ \t]*[\]>)]?'
-                       ]
+                          ]
     regex_to_text = '|'.join(regex_to_be_removed)
     return re.sub(regex_to_text, '', text, flags=re.IGNORECASE)
 

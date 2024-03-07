@@ -15,8 +15,11 @@ from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_colla
 
 
 # TODO:
-#  - focal loss
-#  - hyperparameter grid search
+#  - hyperparameter grid search (parallel inference to save time?)
+#  - print precision and recall
+#  - BM25 baseline
+#  - consider mistral
+#  - learning to rank
 
 
 seed = 62
@@ -28,8 +31,8 @@ torch.manual_seed(seed)
 class EmbeddingHead(torch.nn.Module):
     def __init__(self):
         super(EmbeddingHead, self).__init__()
-        self.linear1 = torch.nn.Linear(EMB_IN, 256)
-        self.linear2 = torch.nn.Linear(256, EMB_OUT)
+        self.linear1 = torch.nn.Linear(EMB_IN, HIDDEN_UNITS)
+        self.linear2 = torch.nn.Linear(HIDDEN_UNITS, EMB_OUT)
         self.relu = torch.nn.ReLU()
         self.cs = torch.nn.CosineSimilarity(dim=1)
         # self.cs = torch.nn.CosineSimilarity(dim=2)
@@ -75,12 +78,10 @@ class EmbeddingHead(torch.nn.Module):
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True):
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=COSINE_LOSS_MARGIN)
-    # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
-    # lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.05, total_iters=num_epochs)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, threshold=1e-3, patience=3,
-                                                              cooldown=3)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
+                                                              patience=PATIENCE, cooldown=COOLDOWN)
 
     history = {'train_loss': [], 'val_loss': [], 'val_f1_score': []}
 
