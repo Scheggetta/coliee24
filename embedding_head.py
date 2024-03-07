@@ -76,10 +76,10 @@ class EmbeddingHead(torch.nn.Module):
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=COSINE_LOSS_MARGIN)
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=ceil(num_epochs / 5), gamma=0.5)
     # lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.05, total_iters=num_epochs)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.2, threshold=1e-3, patience=1,
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, threshold=1e-3, patience=3,
                                                               cooldown=3)
 
     history = {'train_loss': [], 'val_loss': [], 'val_f1_score': []}
@@ -131,7 +131,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         pbar.update()
 
         if save_weights:
-            if epoch == 0 or val_loss < min(history['val_loss'][:-1]):
+            if epoch == 0 or val_f1 > max(history['val_f1_score'][:-1]):
                 # print(f'New best model found (val_loss = {val_loss})! Saving it...')
                 best_weights = model.state_dict()
 
