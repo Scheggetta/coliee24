@@ -9,10 +9,19 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torcheval.metrics.functional import binary_f1_score
 from tqdm import tqdm
 
 from setlist import SetList
 from datetime import datetime
+
+
+# TODO:
+#  - focal loss
+#  - hyperparameter grid search
+#  - better prediction function
+#  - f1 score metric
+#  - alternative model architecture
 
 
 seed = 62
@@ -22,10 +31,16 @@ torch.manual_seed(seed)
 
 
 EMB_IN = 1536
-EMB_OUT = 50
-SAMPLE_SIZE = 15
+EMB_OUT = 50           # 50
+SAMPLE_SIZE = 15       # 15
 TEMPERATURE = 1.0
 PE_WEIGHT = None
+DYNAMIC_CUTOFF = False  # False
+
+# Cutoff hyperparameters
+PE_CUTOFF = 5          # 5
+MAX_DOCS = 10
+RATIO_MAX_SIMILARITY = 0.8
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -231,7 +246,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.2, threshold=1e-3, patience=1,
                                                               cooldown=3)
 
-    history = {'train_loss': [], 'val_loss': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_f1_score': []}
 
     model = model.to('cuda')
 
@@ -268,13 +283,15 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         history['train_loss'].append(train_loss)
 
         # Evaluate the model on the validation set
-        v_losses = evaluate_model(model, validation_dataloader, pe_weight=PE_WEIGHT)
+        v_losses = evaluate_model(model, validation_dataloader, pe_weight=PE_WEIGHT, dynamic_cutoff=DYNAMIC_CUTOFF)
         val_loss = v_losses[1] if v_losses[1] else v_losses[0]
         history['val_loss'].append(val_loss)
+        val_f1 = v_losses[-1]
+        history['val_f1_score'].append(val_f1)
 
         lr_scheduler.step(val_loss)
         pbar.set_description(
-            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
+            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - val_f1: {val_f1:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
         pbar.update()
 
         if save_weights:
@@ -315,7 +332,7 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
-def evaluate_model(model, validation_dataloader, pe_weight=None):
+def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=False):
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
     model.eval()
 
@@ -327,6 +344,7 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
     ne_val_loss = 0.0
     pe_count = 0
     ne_count = 0
+    f1 = 0.0
 
     with torch.no_grad():
         for q_name, q_emb in q_dataloader:
@@ -334,10 +352,16 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
             pe = d_dataloader.dataset.masked_evidences
             pe_idxs = d_dataloader.dataset.get_indexes(pe)
 
+            similarities = []
+
             for d_name, d_emb in d_dataloader:
                 q_emb = q_emb.to('cuda')
                 d_emb = d_emb.to('cuda')
                 query_out, doc_out = model(q_emb, doc=d_emb)
+
+                cs = model.cs(query_out, doc_out)
+                for idx, el in enumerate(cs):
+                    similarities.append((d_name[idx], el.item()))
 
                 d_idxs = d_dataloader.dataset.get_indexes(d_name)
                 targets = torch.Tensor([1 if x in pe_idxs else -1 for x in d_idxs]).to('cuda')
@@ -351,17 +375,37 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
                 pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
                 ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
 
+            # F1 score
+            similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
+            if dynamic_cutoff:
+                threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
+                predicted_pe = [x for x in similarities if x[1] >= threshold]
+            else:
+                predicted_pe = similarities[:PE_CUTOFF]
+
+            # predicted_pe = similarities[:PE_CUTOFF]
+            # threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
+            # predicted_pe = [x for x in similarities if x[1] >= threshold]
+            predicted_pe_names = [x[0] for x in predicted_pe]
+            predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
+            gt = torch.zeros(len(similarities))
+            gt[pe_idxs] = 1
+            targets = torch.zeros(len(similarities))
+            targets[predicted_pe_idxs] = 1
+            f1 += binary_f1_score(gt, targets)
+
             d_dataloader.dataset.restore()
 
     val_loss /= (pe_count + ne_count)
     pe_val_loss /= pe_count
     ne_val_loss /= ne_count
+    f1 /= len(q_dataloader)
     if pe_weight is not None:
         weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
     else:
         weighted_val_loss = None
 
-    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss
+    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, f1
 
 
 def split_dataset(json_dict, split_ratio=0.9):
