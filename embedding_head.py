@@ -12,7 +12,7 @@ from torcheval.metrics.functional import binary_f1_score
 from tqdm import tqdm
 
 from parameters import *
-from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings
+from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
 
 # TODO:
@@ -247,17 +247,6 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
         weighted_val_loss = None
 
     return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, f1
-
-
-def split_dataset(json_dict, split_ratio=0.9):
-    keys = list(json_dict.keys())
-    random.shuffle(keys)
-
-    train_size = ceil(len(json_dict) * split_ratio)
-    train_dict = {key: json_dict[key] for key in keys[:train_size]}
-    val_dict = {key: json_dict[key] for key in keys[train_size:]}
-
-    return train_dict, val_dict
 
 
 def predict(model, q_dataloader, d_dataloader):

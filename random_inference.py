@@ -67,7 +67,7 @@ if __name__ == '__main__':
                 q_emb = q_emb.to('cuda')
                 d_emb = d_emb.to('cuda')
 
-                cs = cs_fn(q_emb, d_emb)
+                cs = torch.rand((len(d_emb),)) * 2 - 1
                 for idx, el in enumerate(cs):
                     similarities.append((d_name[idx], el.item()))
 

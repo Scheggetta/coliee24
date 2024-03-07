@@ -11,7 +11,7 @@ from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
 
-seed = 243
+seed = 3
 print(f'Setting seed to {seed}')
 random.seed(seed)
 np.random.seed(seed)
@@ -67,7 +67,7 @@ if __name__ == '__main__':
                 q_emb = q_emb.to('cuda')
                 d_emb = d_emb.to('cuda')
 
-                cs = cs_fn(q_emb, d_emb)
+                cs = torch.ones(len(d_emb))
                 for idx, el in enumerate(cs):
                     similarities.append((d_name[idx], el.item()))
 
@@ -100,8 +100,7 @@ if __name__ == '__main__':
             predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
             gt = torch.zeros(len(similarities))
             gt[pe_idxs] = 1
-            targets = torch.zeros(len(similarities))
-            targets[predicted_pe_idxs] = 1
+            targets = torch.ones(len(similarities))
             f1 += binary_f1_score(gt, targets)
 
             d_dataloader.dataset.restore()

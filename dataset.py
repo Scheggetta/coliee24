@@ -1,6 +1,7 @@
 import os
 import pickle
 import random
+from math import ceil
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -153,3 +154,14 @@ def get_gpt_embeddings(folder_path: str, selected_dict: dict):
             embeddings[file] = e
 
     return embeddings
+
+
+def split_dataset(json_dict, split_ratio=0.9):
+    keys = list(json_dict.keys())
+    random.shuffle(keys)
+
+    train_size = ceil(len(json_dict) * split_ratio)
+    train_dict = {key: json_dict[key] for key in keys[:train_size]}
+    val_dict = {key: json_dict[key] for key in keys[train_size:]}
+
+    return train_dict, val_dict
