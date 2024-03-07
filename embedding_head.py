@@ -25,7 +25,7 @@ EMB_IN = 1536
 EMB_OUT = 50
 SAMPLE_SIZE = 15
 TEMPERATURE = 1.0
-PE_WEIGHT = 0.9
+PE_WEIGHT = None
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -83,8 +83,7 @@ class TrainingDataset(Dataset):
         self.json_dict = json_dict
 
         queries_names = [key for key in json_dict if key in embeddings]
-        # TODO: fix the reproducibility issue of set
-        self.all_evidences = set([evidence for query_name in queries_names for evidence in json_dict[query_name]])
+        self.all_evidences = sorted(list(set([evidence for query_name in queries_names for evidence in json_dict[query_name]])))
 
         self.queries = []
         for q_name in queries_names:
@@ -109,14 +108,14 @@ class TrainingDataset(Dataset):
 
         excluded_documents = evidence_names.copy()
         excluded_documents.append(query_name)
-        excluded_documents = set(excluded_documents)
 
-        sample_space = self.all_evidences - excluded_documents
+        sample_space = self.all_evidences.copy()
+        for el in excluded_documents:
+            try:
+                sample_space.remove(el)
+            except ValueError:
+                pass
 
-        # negative_evidences_names = []
-        # for i in range(SAMPLE_SIZE):
-        #     idx = torch.randint(0, len(sample_space), (1,)).item()
-        #     el = ...
         negative_evidences_names = random.sample(list(sample_space), SAMPLE_SIZE)
 
         negative_evidences = torch.empty((0, EMB_IN))
@@ -273,7 +272,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         val_loss = v_losses[1] if v_losses[1] else v_losses[0]
         history['val_loss'].append(val_loss)
 
-        lr_scheduler.step(train_loss)
+        lr_scheduler.step(val_loss)
         pbar.set_description(
             f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
         pbar.update()
@@ -424,9 +423,9 @@ if __name__ == '__main__':
     train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
 
     # model.load_weights(Path('Checkpoints/weights_06_03_18-15-27.pt'))
-    res, GT = predict(model, q_dataloader, d_dataloader)
-    sample = list(res.keys())[0]
-    print(res[sample])
-    print(GT[sample])
+    # res, GT = predict(model, q_dataloader, d_dataloader)
+    # sample = list(res.keys())[0]
+    # print(res[sample])
+    # print(GT[sample])
 
     print('done')
