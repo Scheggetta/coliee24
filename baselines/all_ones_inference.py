@@ -11,7 +11,7 @@ from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
 
-seed = 3
+seed = 43
 print(f'Setting seed to {seed}')
 random.seed(seed)
 np.random.seed(seed)
@@ -21,13 +21,13 @@ WHOLE_DATASET = False
 
 
 if __name__ == '__main__':
-    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
+    json_dict = json.load(open('../Dataset/task1_train_labels_2024.json'))
     train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
-    embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train', selected_dict=json_dict)
-    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train', selected_dict=json_dict)
+    training_embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train',
                                              selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    validation_embeddings = get_gpt_embeddings(folder_path='../Dataset/gpt_embed_train',
                                                selected_dict=val_dict)
 
     # dataset = TrainingDataset(training_embeddings, train_dict)
@@ -55,11 +55,17 @@ if __name__ == '__main__':
     f1 = 0.0
     i = 0
 
+    correctly_retrieved_cases = 0
+    retrieved_cases = 0
+    relevant_cases = 0
+
     with torch.no_grad():
         for q_name, q_emb in q_dataloader:
             d_dataloader.dataset.mask(q_name[0])
             pe = d_dataloader.dataset.masked_evidences
             pe_idxs = d_dataloader.dataset.get_indexes(pe)
+
+            relevant_cases += len(pe)
 
             similarities = []
 
@@ -93,14 +99,18 @@ if __name__ == '__main__':
             else:
                 predicted_pe = similarities[:PE_CUTOFF]
 
-            # predicted_pe = similarities[:PE_CUTOFF]
-            # threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
-            # predicted_pe = [x for x in similarities if x[1] >= threshold]
             predicted_pe_names = [x[0] for x in predicted_pe]
             predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
             gt = torch.zeros(len(similarities))
             gt[pe_idxs] = 1
             targets = torch.ones(len(similarities))
+
+            correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
+            retrieved_cases += len(targets[targets == 1])
+            precision = correctly_retrieved_cases / retrieved_cases
+            recall = correctly_retrieved_cases / relevant_cases
+            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+
             f1 += binary_f1_score(gt, targets)
 
             d_dataloader.dataset.restore()
@@ -109,5 +119,5 @@ if __name__ == '__main__':
             pbar.set_description(f'val_loss: {val_loss / (pe_count + ne_count):.3f} - '
                                  f'pe_val_loss: {pe_val_loss / pe_count:.3f} - '
                                  f'ne_val_loss: {ne_val_loss / ne_count:.3f} - '
-                                 f'f1: {f1 / i:.3f}')
+                                 f'f1: {f1_score:.4f}')
             pbar.update()
