@@ -28,6 +28,7 @@ TEMPERATURE = 1.0
 PE_WEIGHT = None
 
 
+BATCH_VAL = 256
 class EmbeddingHead(torch.nn.Module):
     def __init__(self):
         super(EmbeddingHead, self).__init__()
@@ -332,12 +333,14 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
                 query_out.requires_grad = True
                 GT.requires_grad = True
 
-                for el in [q_emb[0] - d_emb[e % 64] for e in pe_idxs if e in range(i*64, (i+1)*64)]:
-                    query_out = torch.cat((query_out, model(el)))
+                shifted_indexes = range(i * BATCH_VAL, (i + 1) * BATCH_VAL)
+                for e in [p_id for p_id in pe_idxs if p_id in shifted_indexes]:
+                    query_out = torch.cat((query_out, model(q_emb[0] - d_emb[e % BATCH_VAL])))
                     GT = torch.cat((GT, torch.Tensor([1.0]).to('cuda')))
-                    pe_count += 1
-                for el in [q_emb[0] - d_emb[e] for e in range(len(d_emb)) if e not in [p % 64 for p in pe_idxs if p in range(i*64, (i+1)*64)]]:
-                    query_out = torch.cat((query_out, model(el)))
+                
+                filtered_indexes = [p % BATCH_VAL for p in pe_idxs if p in shifted_indexes]
+                for e in set(range(len(d_emb))) - set(filtered_indexes):
+                    query_out = torch.cat((query_out, model(q_emb[0] - d_emb[e])))
                     GT = torch.cat((GT, torch.Tensor([0.0]).to('cuda')))
                     ne_count += 1
 
@@ -347,6 +350,7 @@ def evaluate_model(model, validation_dataloader, pe_weight=None):
 
                 i += 1
 
+            pe_count += len(pe_idxs)
             d_dataloader.dataset.restore()
 
     val_loss /= (pe_count + ne_count)
@@ -412,7 +416,7 @@ if __name__ == '__main__':
     query_dataset = QueryDataset(validation_embeddings, val_dict)
     document_dataset = DocumentDataset(validation_embeddings, val_dict)
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-    d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
+    d_dataloader = DataLoader(document_dataset, batch_size=BATCH_VAL, shuffle=False)
 
     model = EmbeddingHead().to('cuda')
 
