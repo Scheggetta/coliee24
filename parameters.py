@@ -1,5 +1,5 @@
 # Preprocessing
-PREPROCESSING_DATASET_TYPE = 'train'  # 'train' or 'test'
+PREPROCESSING_DATASET_TYPE = 'test'  # 'train' or 'test'
 
 # Embedding head
 EMB_IN = 1536

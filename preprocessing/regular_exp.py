@@ -6,6 +6,17 @@ import time
 from parameters import *
 
 
+# TODO:
+#  - spacy or natasha
+#  - check translations
+#  - check gpt embeddings
+
+
+def remove_file_header(text):
+    processed_file = re.split(r'\[1\n?\]', text)
+    return '[1]\n' + ''.join(processed_file[1:])
+
+
 def remove_multiple_alien_topics(text):
     aliens_topic_splits = re.split(r'.* - topic (\d+(\.{1,}\d+){0,})', text, flags=re.IGNORECASE)
 
@@ -97,7 +108,7 @@ def regex_preprocessing_single_file(folder, filename):
     usb_regex = get_unfrequent_square_brackets_regex(folder)
 
     file_text = open(filepath).read()
-    preprocessed_file = remove_multiple_alien_topics(file_text)
+    preprocessed_file = remove_file_header(file_text)
     preprocessed_file = replace_tags_from_regex(preprocessed_file)
     preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file, usb_regex)
     preprocessed_file = remove_tags_from_regex(preprocessed_file)
@@ -113,7 +124,7 @@ def regex_preprocessing(input_directory, output_directory):
     for idx, file_name in enumerate(os.listdir(input_directory)):
         file_text = open(Path.joinpath(Path(input_directory), Path(file_name))).read()
 
-        preprocessed_file = remove_multiple_alien_topics(file_text)
+        preprocessed_file = remove_file_header(file_text)
         preprocessed_file = replace_tags_from_regex(preprocessed_file)
         preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file, usb_regex)
         preprocessed_file = remove_tags_from_regex(preprocessed_file)
@@ -127,25 +138,13 @@ def regex_preprocessing(input_directory, output_directory):
             print(f'Elapsed time: {time.time() - start}')
 
 
-def find_paragraph1_occurrences(input_directory):
-    found_files = []
-    not_found_files = []
-    for idx, file_name in enumerate(os.listdir(input_directory)):
-        file_text = open(Path.joinpath(Path(input_directory), Path(file_name))).read()
-        if len(re.findall(r'\[1\]', file_text, flags=re.IGNORECASE)) > 0:
-            found_files.append(file_name)
-        else:
-            not_found_files.append(file_name)
-    return found_files, not_found_files, len(found_files) + len(not_found_files)
-
-
 if __name__ == '__main__':
     folder = 'Dataset/task1_%s_files_2024' % PREPROCESSING_DATASET_TYPE
 
     # result = find_paragraph1_occurrences(folder)
     # for filename in os.listdir(folder)[:10]:
 
-    filename = '000028.txt'
+    filename = '089775.txt'
     result = regex_preprocessing_single_file(folder, filename)
     # Write the result to a file
     with open('preprocessed.txt', 'w') as f:

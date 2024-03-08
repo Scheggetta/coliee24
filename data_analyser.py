@@ -278,6 +278,51 @@ def analyse_dataset(dataset_folder, query_folder, evidence_folder, freq_threshol
                                        'average_kl_div_random_evidences': avg_kl_div_re_list})
 
 
+def find_paragraph1_occurrences(input_directory):
+    found_files = []
+    not_found_files = []
+    for idx, file_name in enumerate(os.listdir(input_directory)):
+        file_text = open(Path.joinpath(Path(input_directory), Path(file_name))).read()
+        if len(re.findall(r'\[1\]', file_text, flags=re.IGNORECASE)) > 0:
+            found_files.append(file_name)
+        else:
+            not_found_files.append(file_name)
+    return found_files, not_found_files, len(found_files) + len(not_found_files)
+
+
+def calculate_summary_statistics(folder):
+    n_summaries = 0
+    n_useless_summaries = 0
+    for file in os.listdir(folder):
+        with open(Path.joinpath(Path(folder), Path(file)), 'r') as f:
+            text = f.read()
+            summary_len = len(re.findall(r'Summary:?\n', text, flags=re.IGNORECASE))
+            if summary_len > 0:
+                n_summaries += summary_len
+                if len(re.findall(r'This case is unedited', text, flags=re.IGNORECASE)) > 0:
+                    n_useless_summaries += 1
+    return n_summaries, n_useless_summaries, n_summaries / len(os.listdir(folder)), n_useless_summaries / len(
+        os.listdir(folder))
+
+
+def calculate_aliens_topic_statistics(folder):
+    n_topics = 0
+    n_topics_after_paragraph = 0
+    for file in os.listdir(folder):
+        if file == '025275.txt':
+            continue
+        with open(Path.joinpath(Path(folder), Path(file)), 'r') as f:
+            text = f.read()
+            text = re.split(r'\[1\]', text)
+
+            before_paragraph = len(re.findall(r'.* - topic (\d+(\.{1,}\d+){0,})', text[0], flags=re.IGNORECASE))
+            after_paragraph = len(re.findall(r'.* - topic (\d+(\.{1,}\d+){0,})', text[1], flags=re.IGNORECASE))
+            n_topics += before_paragraph + after_paragraph
+            n_topics_after_paragraph += after_paragraph
+
+    return n_topics, n_topics_after_paragraph
+
+
 # TODO: Translate the queries and the evidence files to a common language (English)
 # TODO: Determine the English/French ratio in the dataset
 # TODO: Determine if the French sentences are the translation of the English ones
