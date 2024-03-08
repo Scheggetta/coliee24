@@ -8,14 +8,17 @@ from parameters import *
 
 def remove_multiple_alien_topics(text):
     aliens_topic_splits = re.split(r'.* - topic (\d+(\.{1,}\d+){0,})', text, flags=re.IGNORECASE)
+
+    if len(aliens_topic_splits) == 1:
+        return text
+    aliens_topic_splits = [el for el in aliens_topic_splits if el is not None]
+
     last_topic = aliens_topic_splits[-1]
-    last_topic_splits = re.split(r'\[\d{1,4}\]', last_topic, flags=re.IGNORECASE)
+    last_topic_splits = re.split(r'(\[\d{1,4}\])', last_topic, flags=re.IGNORECASE)
     return '\n'.join([aliens_topic_splits[0]] + last_topic_splits[1:])
 
 
-def remove_least_frequent_square_brackets(text):
-    freqs = get_bracket_freqs_dataset()
-    regex_to_be_removed = '|'.join([key for key in freqs.keys() if freqs[key] < 50]).replace('[', '\[').replace(']', '\]').replace('(', '\(').replace(')', '\)')
+def remove_least_frequent_square_brackets(text, regex_to_be_removed):
     return re.sub(regex_to_be_removed, '', text)
 
 
@@ -68,7 +71,7 @@ def remove_multiple_new_lines_and_spaces(text):
     return processed_file
 
 
-def get_bracket_freqs_dataset(directory='Dataset/task1_%s_files_2024' % PREPROCESSING_DATASET_TYPE):
+def get_unfrequent_square_brackets_regex(directory):
     freq_dict = dict()
     for file in os.listdir(directory):
         with open(Path.joinpath(Path(directory), Path(file)), 'r', encoding='utf-8') as f:
@@ -79,20 +82,31 @@ def get_bracket_freqs_dataset(directory='Dataset/task1_%s_files_2024' % PREPROCE
                     freq_dict[key] += 1
                 else:
                     freq_dict[key] = 1
-    return freq_dict
+
+    regex_to_be_removed = []
+    for key in freq_dict.keys():
+        if freq_dict[key] < 50 and not bool(re.fullmatch(r'\[\d{1,4}\]', key)):
+            regex_to_be_removed.append(re.escape(key))
+    regex_to_be_removed = '|'.join(regex_to_be_removed)
+
+    return regex_to_be_removed
 
 
-def regex_preprocessing_single_file(filepath):
+def regex_preprocessing_single_file(folder, filename):
+    filepath = Path.joinpath(Path(folder), Path(filename))
+    usb_regex = get_unfrequent_square_brackets_regex(folder)
+
     file_text = open(filepath).read()
     preprocessed_file = remove_multiple_alien_topics(file_text)
     preprocessed_file = replace_tags_from_regex(preprocessed_file)
-    preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file)
+    preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file, usb_regex)
     preprocessed_file = remove_tags_from_regex(preprocessed_file)
     return remove_multiple_new_lines_and_spaces(preprocessed_file)
 
 
 def regex_preprocessing(input_directory, output_directory):
     os.makedirs(output_directory, exist_ok=True)
+    usb_regex = get_unfrequent_square_brackets_regex(input_directory)
 
     start = time.time()
 
@@ -101,7 +115,7 @@ def regex_preprocessing(input_directory, output_directory):
 
         preprocessed_file = remove_multiple_alien_topics(file_text)
         preprocessed_file = replace_tags_from_regex(preprocessed_file)
-        preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file)
+        preprocessed_file = remove_least_frequent_square_brackets(preprocessed_file, usb_regex)
         preprocessed_file = remove_tags_from_regex(preprocessed_file)
         preprocessed_file = remove_multiple_new_lines_and_spaces(preprocessed_file)
 
@@ -131,9 +145,8 @@ if __name__ == '__main__':
     # result = find_paragraph1_occurrences(folder)
     # for filename in os.listdir(folder)[:10]:
 
-    filename = '001100.txt'
-    path = Path.joinpath(Path(folder), Path(filename))
-    result = regex_preprocessing_single_file(path)
+    filename = '000028.txt'
+    result = regex_preprocessing_single_file(folder, filename)
     # Write the result to a file
     with open('preprocessed.txt', 'w') as f:
         f.write(result)

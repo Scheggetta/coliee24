@@ -96,6 +96,7 @@ if __name__ == '__main__':
             if DYNAMIC_CUTOFF:
                 threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
                 predicted_pe = [x for x in similarities if x[1] >= threshold]
+                predicted_pe = predicted_pe[:MAX_DOCS] if len(predicted_pe) > MAX_DOCS else predicted_pe
             else:
                 predicted_pe = similarities[:PE_CUTOFF]
 
