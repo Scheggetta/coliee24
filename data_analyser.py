@@ -323,6 +323,9 @@ def calculate_aliens_topic_statistics(folder):
     return n_topics, n_topics_after_paragraph
 
 
+if __name__ == '__main__':
+    par = get_parenthesis_freqs_dataset()
+    pass
 # TODO: Translate the queries and the evidence files to a common language (English)
 # TODO: Determine the English/French ratio in the dataset
 # TODO: Determine if the French sentences are the translation of the English ones
