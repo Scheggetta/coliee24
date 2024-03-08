@@ -1,23 +1,30 @@
 from embedding_head import *
+from utils import set_random_seeds
 import json
 import os
 from pathlib import Path
 from bayes_opt import BayesianOptimization
 
-
 # TODO: do gris search on both train() and evaluate_model()
 PRINT_ALL = False
+SEEDS = [62, 7, 1984]
+EPOCHS = 25
 
 
-def create_training(model, training_dataloader, q_dataloader, d_dataloader):
+def create_training(training_dataloader, q_dataloader, d_dataloader):
     def black_box_function(lr=LR, pe_weight=PE_WEIGHT, factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE,
-                           cooldown=COOLDOWN, num_epochs=2, cosine_loss_margin=COSINE_LOSS_MARGIN,
+                           cooldown=COOLDOWN, hidden_units=HIDDEN_UNITS, cosine_loss_margin=COSINE_LOSS_MARGIN,
                            max_docs=MAX_DOCS, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
-        return max(train(model, training_dataloader, (q_dataloader, d_dataloader), num_epochs,
-                         lr=lr, pe_weight=pe_weight, factor=factor, threshold=threshold, max_docs=max_docs,
-                         patience=patience, cooldown=cooldown, cosine_loss_margin=cosine_loss_margin,
-                         ratio_max_similarity=ratio_max_similarity, pe_cutoff=pe_cutoff,
-                         save_weights=False)['val_f1_score'])
+        model = EmbeddingHead(hidden_units=hidden_units).to('cuda')
+        scores = []
+        for s in SEEDS:
+            set_random_seeds(s)
+            scores.append(max(train(model, training_dataloader, (q_dataloader, d_dataloader),
+                                    num_epochs=EPOCHS, lr=lr, pe_weight=pe_weight, factor=factor, threshold=threshold,
+                                    max_docs=int(max_docs), patience=patience, cooldown=cooldown,
+                                    cosine_loss_margin=cosine_loss_margin, ratio_max_similarity=ratio_max_similarity,
+                                    pe_cutoff=pe_cutoff, save_weights=False)['val_f1_score']))
+        return sum(scores) / len(scores)
     return black_box_function
 
 
@@ -38,25 +45,23 @@ if __name__ == '__main__':
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
-    model = EmbeddingHead().to('cuda')
-
     # Bounded region of parameter space
-    pbounds = {'lr': (0.0001, 0.01),
-               # 'pe_weight': (0, 1),
-               'factor': (0.1, 0.5),
-               'threshold': (1e-4, 1e-2),
-               'patience': (1, 5),
-               'cooldown': (1, 5)}
+    pbounds = {'lr': (0.0001, 0.001),
+               'threshold': (0.0005, 0.002),
+               'patience': (4, 6),
+               'cosine_loss_margin': (0.3, 0.5),
+               'ratio_max_similarity': (0.9, 0.99),
+               }
 
     optimizer = BayesianOptimization(
-        f=create_training(model, training_dataloader, q_dataloader, d_dataloader),
+        f=create_training(training_dataloader, q_dataloader, d_dataloader),
         pbounds=pbounds,
         random_state=62,
     )
 
     optimizer.maximize(
         init_points=2,
-        n_iter=3,
+        n_iter=6,
     )
 
     if PRINT_ALL:

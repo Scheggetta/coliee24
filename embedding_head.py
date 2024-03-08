@@ -147,7 +147,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
     if save_weights:
         model.load_state_dict(best_weights)
-        model.save_weights()
+        model.save_weights(params={'val_f1': max(history['val_f1_score'])})
 
     pbar.close()
     print('Finished Training\n')

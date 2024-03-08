@@ -4,6 +4,8 @@ import shutil
 import json
 from functools import reduce
 from pathlib import Path
+import numpy as np
+import torch
 
 
 def check_split():
@@ -46,6 +48,12 @@ def baseline_F1(pred, gt):
     recall = TP / (TP + FN)
     return {'F1': 2 * precision * recall / (precision + recall), 'precision': precision,
             'recall': recall, 'n_guesses': len(pred)}
+
+
+def set_random_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 # q = (1, 2, 3)
 # e = (2, 3, 3)
