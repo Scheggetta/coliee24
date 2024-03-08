@@ -29,7 +29,7 @@ torch.manual_seed(seed)
 
 
 class EmbeddingHead(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT):
         super(EmbeddingHead, self).__init__()
         self.linear1 = torch.nn.Linear(EMB_IN, HIDDEN_UNITS)
         self.linear2 = torch.nn.Linear(HIDDEN_UNITS, EMB_OUT)
@@ -66,10 +66,16 @@ class EmbeddingHead(torch.nn.Module):
 
             return query, doc
 
-    def save_weights(self):
+    def save_weights(self, params=None):
+        if params is None:
+            params = {}
         os.makedirs('Checkpoints', exist_ok=True)
         now = datetime.now()
-        file_path = Path.joinpath(Path('Checkpoints'), Path(f'weights_{now.strftime("%d_%m_%H-%M-%S")}.pt'))
+        name = f'weights_{now.strftime("%d_%m_%H-%M-%S")}'
+        for par in params:
+            name += f'_{par}_{params[par]}'
+        name += '.pt'
+        file_path = Path.joinpath(Path('Checkpoints'), Path(name))
         torch.save(self.state_dict(), file_path)
 
     def load_weights(self, file_path: Path):
@@ -77,11 +83,13 @@ class EmbeddingHead(torch.nn.Module):
         self.load_state_dict(torch.load(file_path))
 
 
-def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True):
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=COSINE_LOSS_MARGIN)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
-                                                              patience=PATIENCE, cooldown=COOLDOWN)
+def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
+          factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS,
+          cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=factor, threshold=threshold,
+                                                              patience=patience, cooldown=cooldown)
 
     history = {'train_loss': [], 'val_loss': [], 'val_f1_score': []}
 
@@ -106,7 +114,7 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
-            loss = compute_loss(query_out, pe_out, ne_out, loss_function, PE_WEIGHT)
+            loss = compute_loss(query_out, pe_out, ne_out, loss_function, pe_weight)
             loss.backward()
 
             optimizer.step()
@@ -120,7 +128,8 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         history['train_loss'].append(train_loss)
 
         # Evaluate the model on the validation set
-        v_losses = evaluate_model(model, validation_dataloader, pe_weight=PE_WEIGHT, dynamic_cutoff=DYNAMIC_CUTOFF)
+        v_losses = evaluate_model(model, validation_dataloader, pe_weight=pe_weight, dynamic_cutoff=DYNAMIC_CUTOFF,
+                                  ratio_max_similarity=ratio_max_similarity, pe_cutoff=pe_cutoff, max_docs=max_docs)
         val_loss = v_losses[1] if v_losses[1] else v_losses[0]
         history['val_loss'].append(val_loss)
         val_f1 = v_losses[-1]
@@ -168,7 +177,8 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
-def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=False):
+def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=False,
+                   ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF, max_docs=MAX_DOCS):
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
     model.eval()
 
@@ -220,10 +230,11 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
             # F1 score
             similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
             if dynamic_cutoff:
-                threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
+                threshold = similarities[0][1] * ratio_max_similarity
                 predicted_pe = [x for x in similarities if x[1] >= threshold]
+                predicted_pe = predicted_pe[:max_docs] if len(predicted_pe) > max_docs else predicted_pe
             else:
-                predicted_pe = similarities[:PE_CUTOFF]
+                predicted_pe = similarities[:pe_cutoff]
 
             predicted_pe_names = [x[0] for x in predicted_pe]
             predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)

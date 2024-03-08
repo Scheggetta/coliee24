@@ -20,3 +20,4 @@ argostranslate
 tiktoken
 openai
 lingua-language-detector
+bayesian-optimization
