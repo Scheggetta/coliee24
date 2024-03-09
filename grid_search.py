@@ -4,11 +4,12 @@ import json
 import os
 from pathlib import Path
 from bayes_opt import BayesianOptimization
+import matplotlib.pyplot as plt
 
 # TODO: do gris search on both train() and evaluate_model()
-PRINT_ALL = False
 SEEDS = [62, 7, 1984]
 EPOCHS = 25
+SAVE_BEST_WEIGHTS = True
 
 
 def create_training(training_dataloader, q_dataloader, d_dataloader):
@@ -23,14 +24,18 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
                                     num_epochs=EPOCHS, lr=lr, pe_weight=pe_weight, factor=factor, threshold=threshold,
                                     max_docs=int(max_docs), patience=patience, cooldown=cooldown,
                                     cosine_loss_margin=cosine_loss_margin, ratio_max_similarity=ratio_max_similarity,
-                                    pe_cutoff=pe_cutoff, save_weights=False)['val_f1_score']))
+                                    pe_cutoff=pe_cutoff, save_weights=False, verbose=False)['val_f1_score']))
+            print(f'F1 score for seed {s}: {scores[-1]}')
         return sum(scores) / len(scores)
+
     return black_box_function
 
 
 if __name__ == '__main__':
     json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
+    split_ratio = 0.9
+    train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
+    print(f'Building dataset with split ratio {split_ratio}...')
 
     training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
                                              selected_dict=train_dict)
@@ -45,7 +50,6 @@ if __name__ == '__main__':
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
-    # Bounded region of parameter space
     pbounds = {'lr': (0.0001, 0.001),
                'threshold': (0.0005, 0.002),
                'patience': (4, 6),
@@ -58,13 +62,31 @@ if __name__ == '__main__':
         pbounds=pbounds,
         random_state=62,
     )
-
+    print(f'Beginning optimization of {len(pbounds)} params with {len(SEEDS)} seeds...')
     optimizer.maximize(
-        init_points=2,
+        init_points=3,
         n_iter=6,
     )
 
-    if PRINT_ALL:
-        for i, res in enumerate(optimizer.res):
-            print("Iteration {}: \n\t{}".format(i, res))
     print("Best parameters combination: \n\t{}".format(optimizer.max))
+
+    plt.figure(figsize=(15, 5))
+    plt.plot(range(1, 1 + len(optimizer.space.target)), optimizer.space.target, "-o")
+    plt.grid(True)
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Black box function", fontsize=12)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.title("Grid search results for parameters: " + ", ".join(list(pbounds.keys())), fontsize=16)
+    plt.show(block=False)
+    plt.pause(0.05)
+
+    plot_dir = Path.joinpath(Path('Checkpoints'), Path('GridPlots'))
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(Path.joinpath(plot_dir, Path(f'Plot_for_GD_Target_{optimizer.max["target"]}.png')))
+
+    if SAVE_BEST_WEIGHTS:
+        print('Saving best weights...')
+        model = EmbeddingHead().to('cuda')
+        train(model, training_dataloader, (q_dataloader, d_dataloader), **optimizer.max['params'],
+              num_epochs=EPOCHS * 2, save_weights=True, verbose=True)

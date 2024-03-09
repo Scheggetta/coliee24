@@ -63,6 +63,7 @@ target/
 
 # Project specific
 Dataset/
+Checkpoints/
 
 en_fr.argosmodel
 fr_en.argosmodel

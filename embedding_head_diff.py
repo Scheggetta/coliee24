@@ -422,10 +422,4 @@ if __name__ == '__main__':
 
     train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
 
-    # model.load_weights(Path('Checkpoints/weights_06_03_18-15-27.pt'))
-    # res, GT = predict(model, q_dataloader, d_dataloader)
-    # sample = list(res.keys())[0]
-    # print(res[sample])
-    # print(GT[sample])
-
     print('done')

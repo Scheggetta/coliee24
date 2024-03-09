@@ -84,7 +84,7 @@ class EmbeddingHead(torch.nn.Module):
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
-          factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS,
+          factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS, verbose=True,
           cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
@@ -95,7 +95,8 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
     model = model.to('cuda')
 
-    pbar = tqdm(total=num_epochs, desc='Training')
+    if verbose:
+        pbar = tqdm(total=num_epochs, desc='Training')
 
     best_weights = model.state_dict()
     for epoch in range(num_epochs):
@@ -136,9 +137,10 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         history['val_f1_score'].append(val_f1)
 
         lr_scheduler.step(val_loss)
-        pbar.set_description(
-            f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - val_f1: {val_f1:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
-        pbar.update()
+        if verbose:
+            pbar.set_description(
+                f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - val_f1: {val_f1:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
+            pbar.update()
 
         if save_weights:
             if epoch == 0 or val_f1 > max(history['val_f1_score'][:-1]):
@@ -149,8 +151,9 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         model.load_state_dict(best_weights)
         model.save_weights(params={'val_f1': max(history['val_f1_score'])})
 
-    pbar.close()
-    print('Finished Training\n')
+    if verbose:
+        pbar.close()
+        print('Finished Training\n')
     return history
 
 
@@ -293,7 +296,9 @@ def predict(model, q_dataloader, d_dataloader):
 
 if __name__ == '__main__':
     json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
+    split_ratio = 0.9
+    train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
+    print(f'Building Dataset with split ratio {split_ratio}...')
 
     training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
                                              selected_dict=train_dict)
@@ -309,13 +314,7 @@ if __name__ == '__main__':
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
     model = EmbeddingHead().to('cuda')
-
+    print('Beginning training procedure...')
     train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
-
-    # model.load_weights(Path('Checkpoints/weights_06_03_18-15-27.pt'))
-    # res, GT = predict(model, q_dataloader, d_dataloader)
-    # sample = list(res.keys())[0]
-    # print(res[sample])
-    # print(GT[sample])
 
     print('done')
