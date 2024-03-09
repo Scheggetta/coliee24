@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from setlist import SetList
 from parameters import *
+from pathlib import Path
 
 
 class TrainingDataset(Dataset):
@@ -120,7 +121,7 @@ def custom_collate_fn(batch: list):
     return queries, evidences, negative_evidences
 
 
-def get_gpt_embeddings(folder_path: str, selected_dict: dict):
+def get_gpt_embeddings(folder_path: Path, selected_dict: dict):
     embeddings = {}
 
     files = []

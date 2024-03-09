@@ -32,14 +32,15 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
 
 
 if __name__ == '__main__':
-    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
+    json_path = Path.joinpath(Path('Dataset'), Path(f'task1_train_labels_2024.json'))
+    json_dict = json.load(open(json_path))
     split_ratio = 0.9
     train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
     print(f'Building dataset with split ratio {split_ratio}...')
 
-    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                              selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    validation_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                                selected_dict=val_dict)
 
     dataset = TrainingDataset(training_embeddings, train_dict)
@@ -51,9 +52,9 @@ if __name__ == '__main__':
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
     pbounds = {'lr': (0.0001, 0.001),
-               'threshold': (0.0005, 0.002),
-               'patience': (4, 6),
-               'cosine_loss_margin': (0.3, 0.5),
+               'threshold': (0.0001, 0.005),
+               'patience': (3, 7),
+               'cosine_loss_margin': (0.1, 0.6),
                'ratio_max_similarity': (0.9, 0.99),
                }
 

@@ -10,22 +10,15 @@ from torch.utils.data import DataLoader
 from torcheval.metrics.functional import binary_f1_score
 from tqdm import tqdm
 
+from utils import set_random_seeds
 from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
-
 
 # TODO:
 #  - hyperparameter grid search (parallel inference to save time?)
 #  - print precision and recall
 #  - BM25 baseline
 #  - learning to rank
-
-
-seed = 623
-print(f'Setting seed to {seed}')
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -227,8 +220,10 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
                 ne_count += len(ne)
 
                 val_loss += loss_function(query_out, doc_out, targets).sum()
-                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
-                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
+                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe,
+                                                                      torch.ones(len(pe)).to('cuda')).sum()
+                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne,
+                                                                      -torch.ones(len(ne)).to('cuda')).sum()
 
             # F1 score
             similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
@@ -268,10 +263,13 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, f1_score
 
 
+# TODO: This does not actually work. It was implemented to test the testing. Make a proper one
+
 def predict(model, q_dataloader, d_dataloader):
     model.eval()
     results = {}
     GT = {}
+    pbar = tqdm(total=len(q_dataloader), desc='Processed files')
     for q_name, q_emb in q_dataloader:
         d_dataloader.dataset.mask(q_name[0])
         pe = d_dataloader.dataset.masked_evidences
@@ -287,34 +285,71 @@ def predict(model, q_dataloader, d_dataloader):
 
             similarities = [model.cs(query_out, x.unsqueeze(0)) for x in doc_out]
             results[q_name] += [1 if similarities[n] > 0 else 0 for n in range(len(similarities))]
-            GT[q_name] += torch.Tensor([1 if x in pe_idxs else -1 for x in d_idxs])
+            GT[q_name] += torch.Tensor([1 if x in pe_idxs else 0 for x in d_idxs])
 
         d_dataloader.dataset.restore()
+        pbar.update()
 
+    pbar.close()
     return results, GT
 
 
+def get_best_weights():
+    weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt')]
+    best_path = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))[-1]
+    return Path.joinpath(Path('Checkpoints'), Path(best_path))
+
+
 if __name__ == '__main__':
-    json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
-    split_ratio = 0.9
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
-    print(f'Building Dataset with split ratio {split_ratio}...')
+    set_random_seeds(62)
+    if PREPROCESSING_DATASET_TYPE == 'train':
+        json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
+        split_ratio = 0.9
+        train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
+        print(f'Building Dataset with split ratio {split_ratio}...')
 
-    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
-                                             selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
-                                               selected_dict=val_dict)
+        training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
+                                                 selected_dict=train_dict)
+        validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
+                                                   selected_dict=val_dict)
 
-    dataset = TrainingDataset(training_embeddings, train_dict)
-    training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
+        dataset = TrainingDataset(training_embeddings, train_dict)
+        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
 
-    query_dataset = QueryDataset(validation_embeddings, val_dict)
-    document_dataset = DocumentDataset(validation_embeddings, val_dict)
-    q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-    d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
+        query_dataset = QueryDataset(validation_embeddings, val_dict)
+        document_dataset = DocumentDataset(validation_embeddings, val_dict)
+        q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
+        d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
-    model = EmbeddingHead().to('cuda')
-    print('Beginning training procedure...')
-    train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
+        model = EmbeddingHead().to('cuda')
+        print('Beginning training procedure...')
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
+    else:
+        json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
+        test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
+                                             selected_dict=json_dict)
+
+        query_dataset = QueryDataset(test_embeddings, json_dict)
+        document_dataset = DocumentDataset(test_embeddings, json_dict)
+        q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
+        d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
+
+        model = EmbeddingHead().to('cuda')
+        model.load_weights(Path(get_best_weights()))
+        print('Beginning test procedure...')
+        results, GT = predict(model, q_dataloader, d_dataloader)
+        sum_predictions = 0
+        sum_labels = 0
+        TP = 0
+        for query in results.keys():
+            predictions = np.array(results[query])
+            labels = np.array(GT[query])
+            TP += sum(predictions[predictions == labels])
+            sum_predictions += sum(predictions)
+            sum_labels += sum(labels)
+        precision = TP / sum_predictions
+        recall = TP / sum_labels
+        f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+        print(f'F1 = {f1}')
 
     print('done')

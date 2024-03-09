@@ -14,6 +14,7 @@ from torcheval.metrics.functional import binary_f1_score
 from parameters import *
 from dataset import split_dataset
 from setlist import SetList
+from pathlib import Path
 
 
 seed = 62
@@ -67,8 +68,9 @@ class BM25Custom(BM25Okapi):
 
 
 if __name__ == '__main__':
-    folder = 'Dataset/translated_%s' % PREPROCESSING_DATASET_TYPE
-    json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
+    folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
+    json_path = Path.joinpath(Path('Dataset'), Path(f'task1_{PREPROCESSING_DATASET_TYPE}_labels_2024.json'))
+    json_dict = json.load(open(json_path))
     train_dict, val_dict = split_dataset(json_dict, split_ratio=0.01)
 
     val_files = []
@@ -104,7 +106,7 @@ if __name__ == '__main__':
 
         relevant_cases += len(pe)
 
-        indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N)
+        indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N+1)
         predicted_pe_names = [d_preprocessed_corpus[idx][0] for idx in indexes if idx != files.index(q_name)]
         predicted_pe_idxs = [files.index(x) for x in predicted_pe_names]
 
@@ -118,8 +120,6 @@ if __name__ == '__main__':
         precision = correctly_retrieved_cases / retrieved_cases
         recall = correctly_retrieved_cases / relevant_cases
         f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-
-        f1 += binary_f1_score(gt, targets)
 
         i += 1
         pbar.set_description(f'f1: {f1_score:.4f}')
