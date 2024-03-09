@@ -18,7 +18,8 @@ gdown
 
 nltk
 argostranslate
+spacy
 tiktoken
 openai
 lingua-language-detector
-bayesian-optimization
+rank_bm25

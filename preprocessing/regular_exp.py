@@ -6,12 +6,6 @@ import time
 from parameters import *
 
 
-# TODO:
-#  - spacy or natasha
-#  - check translations
-#  - check gpt embeddings
-
-
 def remove_file_header(text):
     processed_file = re.split(r'\[1\n?\]', text)
     return '[1]\n' + ''.join(processed_file[1:])
@@ -140,6 +134,9 @@ def regex_preprocessing(input_directory, output_directory):
 
 if __name__ == '__main__':
     folder = 'Dataset/task1_%s_files_2024' % PREPROCESSING_DATASET_TYPE
+    # output_folder = 'Dataset/regex_preprocessed_%s' % PREPROCESSING_DATASET_TYPE
+    # regex_preprocessing(folder, output_folder)
+    # quit()
 
     # result = find_paragraph1_occurrences(folder)
     # for filename in os.listdir(folder)[:10]:

@@ -1,5 +1,6 @@
 # Preprocessing
 PREPROCESSING_DATASET_TYPE = 'test'  # 'train' or 'test'
+FRENCH_THRESHOLD = 0.4
 
 # Embedding head
 EMB_IN = 1536
