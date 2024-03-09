@@ -22,7 +22,7 @@ def get_token_count(paragraphs):
     return token_count, sum(token_count)
 
 
-dataset_to_preprocess = 'train'  # Possible values: 'train', 'test'
+dataset_to_preprocess = 'test'  # Possible values: 'train', 'test'
 TRAIN_DATASET_DIR = Path.joinpath(Path(Path(__file__).parent.parent), Path('Dataset/task1_train_files_2024'))
 TEST_DATASET_DIR = Path.joinpath(Path(Path(__file__).parent.parent), Path('Dataset/task1_test_files_2024'))
 DATASET_DIR = TRAIN_DATASET_DIR if dataset_to_preprocess == 'train' else TEST_DATASET_DIR
@@ -209,7 +209,7 @@ if __name__ == '__main__':
 
     dataset_folder = Path.joinpath(Path('..'), 'Dataset')
     input_path = TRANSLATED_DIR
-    output_path = Path.joinpath(dataset_folder, 'gpt_embed_train')
+    output_path = Path.joinpath(dataset_folder, 'gpt_embed_%s' % dataset_to_preprocess)
 
     for idx, file_name in enumerate(os.listdir(TRANSLATED_DIR)):
         filepath = Path.joinpath(input_path, Path(file_name))

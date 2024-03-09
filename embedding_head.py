@@ -18,11 +18,11 @@ from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_colla
 #  - hyperparameter grid search (parallel inference to save time?)
 #  - print precision and recall
 #  - BM25 baseline
-#  - consider mistral
 #  - learning to rank
 
 
-seed = 62
+seed = 623
+print(f'Setting seed to {seed}')
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -295,14 +295,14 @@ def predict(model, q_dataloader, d_dataloader):
 
 
 if __name__ == '__main__':
-    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
+    json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
     split_ratio = 0.9
     train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
     print(f'Building Dataset with split ratio {split_ratio}...')
 
-    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
                                              selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
+    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
                                                selected_dict=val_dict)
 
     dataset = TrainingDataset(training_embeddings, train_dict)
