@@ -71,7 +71,7 @@ if __name__ == '__main__':
     folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
     json_path = Path.joinpath(Path('Dataset'), Path(f'task1_{PREPROCESSING_DATASET_TYPE}_labels_2024.json'))
     json_dict = json.load(open(json_path))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.01)
+    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.0001)
 
     val_files = []
     for key, values in val_dict.items():

@@ -2,13 +2,13 @@ import os
 import pickle
 import random
 from math import ceil
+from pathlib import Path
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from setlist import SetList
 from parameters import *
-from pathlib import Path
 
 
 class TrainingDataset(Dataset):

@@ -181,12 +181,11 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     q_dataloader, d_dataloader = validation_dataloader
     loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
 
-    val_loss = 0.0
-    pe_val_loss = 0.0
-    ne_val_loss = 0.0
+    val_loss = torch.tensor(0.0).to('cuda')
+    pe_val_loss = torch.tensor(0.0).to('cuda')
+    ne_val_loss = torch.tensor(0.0).to('cuda')
     pe_count = 0
     ne_count = 0
-    f1 = 0.0
 
     correctly_retrieved_cases = 0
     retrieved_cases = 0
@@ -220,10 +219,10 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
                 ne_count += len(ne)
 
                 val_loss += loss_function(query_out, doc_out, targets).sum()
-                pe_val_loss += 0.0 if len(pe) == 0 else loss_function(query_out, pe,
-                                                                      torch.ones(len(pe)).to('cuda')).sum()
-                ne_val_loss += 0.0 if len(ne) == 0 else loss_function(query_out, ne,
-                                                                      -torch.ones(len(ne)).to('cuda')).sum()
+                if len(pe) > 0:
+                    pe_val_loss += loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
+                if len(ne) > 0:
+                    ne_val_loss += loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
 
             # F1 score
             similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
@@ -247,51 +246,17 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
             recall = correctly_retrieved_cases / relevant_cases
             f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
-            f1 += binary_f1_score(gt, targets)
-
             d_dataloader.dataset.restore()
 
     val_loss /= (pe_count + ne_count)
     pe_val_loss /= pe_count
     ne_val_loss /= ne_count
-    f1 /= len(q_dataloader)
     if pe_weight is not None:
         weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
     else:
         weighted_val_loss = None
 
     return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, f1_score
-
-
-# TODO: This does not actually work. It was implemented to test the testing. Make a proper one
-
-def predict(model, q_dataloader, d_dataloader):
-    model.eval()
-    results = {}
-    GT = {}
-    pbar = tqdm(total=len(q_dataloader), desc='Processed files')
-    for q_name, q_emb in q_dataloader:
-        d_dataloader.dataset.mask(q_name[0])
-        pe = d_dataloader.dataset.masked_evidences
-        pe_idxs = d_dataloader.dataset.get_indexes(pe)
-        q_emb = q_emb.to('cuda')
-
-        results[q_name] = []
-        GT[q_name] = []
-        for d_name, d_emb in d_dataloader:
-            d_emb = d_emb.to('cuda')
-            d_idxs = d_dataloader.dataset.get_indexes(d_name)
-            query_out, doc_out = model(q_emb, doc=d_emb)
-
-            similarities = [model.cs(query_out, x.unsqueeze(0)) for x in doc_out]
-            results[q_name] += [1 if similarities[n] > 0 else 0 for n in range(len(similarities))]
-            GT[q_name] += torch.Tensor([1 if x in pe_idxs else 0 for x in d_idxs])
-
-        d_dataloader.dataset.restore()
-        pbar.update()
-
-    pbar.close()
-    return results, GT
 
 
 def get_best_weights():
@@ -301,7 +266,7 @@ def get_best_weights():
 
 
 if __name__ == '__main__':
-    set_random_seeds(62)
+    set_random_seeds(623)
     if PREPROCESSING_DATASET_TYPE == 'train':
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         split_ratio = 0.9
@@ -319,11 +284,11 @@ if __name__ == '__main__':
         query_dataset = QueryDataset(validation_embeddings, val_dict)
         document_dataset = DocumentDataset(validation_embeddings, val_dict)
         q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-        d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
+        d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
 
         model = EmbeddingHead().to('cuda')
         print('Beginning training procedure...')
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 3)
     else:
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
@@ -336,20 +301,14 @@ if __name__ == '__main__':
 
         model = EmbeddingHead().to('cuda')
         model.load_weights(Path(get_best_weights()))
+        # model.load_weights(Path('Checkpoints/....pt'))
         print('Beginning test procedure...')
-        results, GT = predict(model, q_dataloader, d_dataloader)
-        sum_predictions = 0
-        sum_labels = 0
-        TP = 0
-        for query in results.keys():
-            predictions = np.array(results[query])
-            labels = np.array(GT[query])
-            TP += sum(predictions[predictions == labels])
-            sum_predictions += sum(predictions)
-            sum_labels += sum(labels)
-        precision = TP / sum_predictions
-        recall = TP / sum_labels
-        f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-        print(f'F1 = {f1}')
+        results = evaluate_model(model, (q_dataloader, d_dataloader),
+                                 pe_weight=PE_WEIGHT,
+                                 dynamic_cutoff=DYNAMIC_CUTOFF,
+                                 ratio_max_similarity=RATIO_MAX_SIMILARITY,
+                                 pe_cutoff=PE_CUTOFF,
+                                 max_docs=MAX_DOCS)
+        print(f'Test set: val_f1: {results}')
 
     print('done')

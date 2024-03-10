@@ -1,5 +1,6 @@
 import json
 import random
+from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
@@ -21,24 +22,29 @@ WHOLE_DATASET = False
 
 
 if __name__ == '__main__':
-    json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
+    if PREPROCESSING_DATASET_TYPE == 'train':
+        json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
+        train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
-    embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train', selected_dict=json_dict)
-    training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
-                                             selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_train',
-                                               selected_dict=val_dict)
+        embeddings = get_gpt_embeddings(folder_path=Path('Dataset/gpt_embed_train'),
+                                        selected_dict=json_dict)
+        training_embeddings = get_gpt_embeddings(folder_path=Path('Dataset/gpt_embed_train'),
+                                                 selected_dict=train_dict)
+        validation_embeddings = get_gpt_embeddings(folder_path=Path('Dataset/gpt_embed_train'),
+                                                   selected_dict=val_dict)
 
-    # dataset = TrainingDataset(training_embeddings, train_dict)
-    # training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
-
-    if WHOLE_DATASET:
-        query_dataset = QueryDataset(embeddings, json_dict)
-        document_dataset = DocumentDataset(embeddings, json_dict)
+        if WHOLE_DATASET:
+            query_dataset = QueryDataset(embeddings, json_dict)
+            document_dataset = DocumentDataset(embeddings, json_dict)
+        else:
+            query_dataset = QueryDataset(validation_embeddings, val_dict)
+            document_dataset = DocumentDataset(validation_embeddings, val_dict)
     else:
-        query_dataset = QueryDataset(validation_embeddings, val_dict)
-        document_dataset = DocumentDataset(validation_embeddings, val_dict)
+        json_dict = json.load(open('Dataset/task1_test_labels_2024.json'))
+        test_embeddings = get_gpt_embeddings(folder_path=Path('Dataset/gpt_embed_test'), selected_dict=json_dict)
+        query_dataset = QueryDataset(test_embeddings, json_dict)
+        document_dataset = DocumentDataset(test_embeddings, json_dict)
+
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 

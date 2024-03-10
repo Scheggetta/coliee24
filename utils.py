@@ -51,6 +51,7 @@ def baseline_F1(pred, gt):
 
 
 def set_random_seeds(seed):
+    print(f'Setting seed to {seed}')
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
