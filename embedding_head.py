@@ -76,11 +76,19 @@ class EmbeddingHead(torch.nn.Module):
         self.load_state_dict(torch.load(file_path))
 
 
+def contrastive_loss_function(similarity_metric, query, positives, negatives):
+    positive_contribution = torch.sum(torch.exp(similarity_metric(query, positives)))
+    negative_contribution = torch.sum(torch.exp(similarity_metric(query, negatives)))
+    loss_score = -torch.log(positive_contribution / (positive_contribution + negative_contribution))
+    return loss_score
+
+
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
           factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS, verbose=True,
           cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
+    # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
+    loss_function = contrastive_loss_function
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=factor, threshold=threshold,
                                                               patience=patience, cooldown=cooldown)
 
@@ -108,7 +116,8 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
-            loss = compute_loss(query_out, pe_out, ne_out, loss_function, pe_weight)
+            # loss = compute_loss(query_out, pe_out, ne_out, loss_function, pe_weight)
+            loss = compute_contrastive_loss(query_out, pe_out, ne_out, loss_function, model.cs)
             loss.backward()
 
             optimizer.step()
@@ -175,13 +184,26 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
+def compute_contrastive_loss(query, pe, ne, loss_function, similarity_function):
+    loss = torch.tensor(0.0).to('cuda')
+    for idx, query_el in enumerate(query):
+        query_el = query_el.unsqueeze(0)
+        pe_el = pe[idx]
+        ne_el = ne[idx]
+
+        loss += loss_function(similarity_function, query_el, pe_el, ne_el)
+    return loss / len(query)
+
+
 def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=False,
                    ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF, max_docs=MAX_DOCS):
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
     model.eval()
 
     q_dataloader, d_dataloader = validation_dataloader
-    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+    # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+    loss_function = contrastive_loss_function
+
 
     val_loss = torch.tensor(0.0).to('cuda')
     pe_val_loss = torch.tensor(0.0).to('cuda')
@@ -220,11 +242,12 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
                 ne = doc_out[targets == -1]
                 ne_count += len(ne)
 
-                val_loss += loss_function(query_out, doc_out, targets).sum()
-                if len(pe) > 0:
-                    pe_val_loss += loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
-                if len(ne) > 0:
-                    ne_val_loss += loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
+                val_loss += loss_function(model.cs, query_out, pe, ne)
+                # val_loss += loss_function(query_out, doc_out, targets).sum()
+                # if len(pe) > 0:
+                #     pe_val_loss += loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
+                # if len(ne) > 0:
+                #     ne_val_loss += loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
 
             # F1 score
             similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
@@ -251,14 +274,15 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
             d_dataloader.dataset.restore()
 
     val_loss /= (pe_count + ne_count)
-    pe_val_loss /= pe_count
-    ne_val_loss /= ne_count
-    if pe_weight is not None:
-        weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
-    else:
-        weighted_val_loss = None
+    # pe_val_loss /= pe_count
+    # ne_val_loss /= ne_count
+    # if pe_weight is not None:
+    #     weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
+    # else:
+    #     weighted_val_loss = None
 
-    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
+    # return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
+    return val_loss, None, pe_val_loss, ne_val_loss, precision, recall, f1_score
 
 
 def get_best_weights():
