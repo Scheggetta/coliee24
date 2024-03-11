@@ -122,21 +122,23 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         history['train_loss'].append(train_loss)
 
         # Evaluate the model on the validation set
-        v_losses = evaluate_model(model, validation_dataloader, pe_weight=pe_weight, dynamic_cutoff=DYNAMIC_CUTOFF,
-                                  ratio_max_similarity=ratio_max_similarity, pe_cutoff=pe_cutoff, max_docs=max_docs)
-        val_loss = v_losses[1] if v_losses[1] else v_losses[0]
+        metrics = evaluate_model(model, validation_dataloader, pe_weight=pe_weight, dynamic_cutoff=DYNAMIC_CUTOFF,
+                                 ratio_max_similarity=ratio_max_similarity, pe_cutoff=pe_cutoff, max_docs=max_docs)
+        val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score = metrics
         history['val_loss'].append(val_loss)
-        val_f1 = v_losses[-1]
-        history['val_f1_score'].append(val_f1)
+        history['val_f1_score'].append(f1_score)
 
         lr_scheduler.step(val_loss)
         if verbose:
             pbar.set_description(
-                f'Epoch {epoch + 1}/{num_epochs} - loss: {train_loss:.3f} - val_loss: {val_loss:.3f} - val_f1: {val_f1:.3f} - lr: {lr_scheduler._last_lr[-1]:.6f}')
+                f'Epoch {epoch + 1}/{num_epochs} - loss:{train_loss:.3f} - v_loss:{val_loss:.3f} - '
+                f'weighted_loss:{weighted_val_loss:.3f} - pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
+                f'pre:{precision:.3f} - rec:{recall:.3f} - f1:{f1_score:.3f} - '
+                f'lr:{lr_scheduler._last_lr[-1]:.1E}')
             pbar.update()
 
         if save_weights:
-            if epoch == 0 or val_f1 > max(history['val_f1_score'][:-1]):
+            if epoch == 0 or f1_score > max(history['val_f1_score'][:-1]):
                 # print(f'New best model found (val_loss = {val_loss})! Saving it...')
                 best_weights = model.state_dict()
 
@@ -256,7 +258,7 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     else:
         weighted_val_loss = None
 
-    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, f1_score
+    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
 
 
 def get_best_weights():
@@ -288,7 +290,7 @@ if __name__ == '__main__':
 
         model = EmbeddingHead().to('cuda')
         print('Beginning training procedure...')
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 3)
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 30)
     else:
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
@@ -300,8 +302,8 @@ if __name__ == '__main__':
         d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
         model = EmbeddingHead().to('cuda')
-        model.load_weights(Path(get_best_weights()))
-        # model.load_weights(Path('Checkpoints/....pt'))
+        # model.load_weights(Path(get_best_weights()))
+        model.load_weights(Path('Checkpoints/weights_10_03_15-33-04_val_f1_0.2617124394184169.pt'))
         print('Beginning test procedure...')
         results = evaluate_model(model, (q_dataloader, d_dataloader),
                                  pe_weight=PE_WEIGHT,

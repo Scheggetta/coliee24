@@ -151,7 +151,8 @@ def get_gpt_embeddings(folder_path: Path, selected_dict: dict):
             n_paragraphs = len(e) // EMB_IN
             assert len(e) % EMB_IN == 0
 
-            e = torch.tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
+            e = torch.Tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
+            # e = torch.Tensor(e[:EMB_IN])
             embeddings[file] = e
 
     return embeddings
