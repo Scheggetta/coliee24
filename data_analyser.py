@@ -12,6 +12,14 @@ from lingua import Language, LanguageDetectorBuilder
 from argostranslate import package, translate
 import re
 import shutil
+import umap
+import pickle
+import torch
+from parameters import EMB_IN
+import umap.plot
+import matplotlib.pyplot as plt
+import json
+
 
 pd.set_option('display.max_columns', None)
 package.install_from_path('fr_en.argosmodel')
@@ -322,8 +330,62 @@ def calculate_aliens_topic_statistics(folder):
 
     return n_topics, n_topics_after_paragraph
 
+def get_embedding_dict():
+    embeddings_folder = 'Dataset/gpt_embed_train'
+    embedding_dict = dict()
+    paragraph_count = dict()
+    for file in os.listdir(embeddings_folder):
+        if file == 'backup':
+            continue
+        with open(Path.joinpath(Path(embeddings_folder), Path(file)), 'rb') as f:
+            e = pickle.load(f)
+            n_paragraphs = len(e) // EMB_IN
+            paragraph_count[file] = n_paragraphs
+            assert len(e) % EMB_IN == 0
+            e = torch.Tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
+            embedding_dict[file] = e
+    return embedding_dict
+
+
+def get_mapper(embedding_dict, save=False, save_path='Dataset/umap_mapper.pkl'):
+    if Path('Dataset/umap_mapper.pkl').exists():
+        return pickle.load(open('Dataset/umap_mapper.pkl', 'rb'))
+
+    if save:
+        mapper = umap.UMAP().fit(list(embedding_dict.values()))
+        with open(save_path, 'wb') as f:
+            pickle.dump(mapper, f)
+        return mapper
+    else:
+        return umap.UMAP().fit(list(embedding_dict.values()))
+
+
+def plot_umap(mapper, embedding_dict, query, trans_dict):
+    query_map = mapper.transform(embedding_dict[query].reshape(1, -1))
+    evidences = trans_dict[query]
+    fig = plt.figure()
+    ax = fig.gca()
+    ax.scatter(mapper.embedding_[:, 0], mapper.embedding_[:, 1], s=2)
+    ax.scatter(query_map[:, 0], query_map[:, 1], s=2, color='r', label=f'{query}')
+    for ev in evidences:
+        evidence_map = mapper.transform(embedding_dict[ev].reshape(1, -1))
+        ax.scatter(evidence_map[:, 0], evidence_map[:, 1], s=2, color='m', label=f'{ev}')
+        ax.annotate(f'{ev}', xy=(evidence_map[:, 0], evidence_map[:, 1]), xytext=(evidence_map[:, 0]-.05, evidence_map[:, 1]-.05),
+                    fontsize=4)
+    ax.legend()
+    plt.show()
+
 
 if __name__ == '__main__':
+    lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
+    queries = list(lookup_table.keys())
+    embedding_dict = get_embedding_dict()
+    mapper = get_mapper(embedding_dict)
+    for i in range(10):
+        random_query = random.choice(queries)  # '072217.txt', '097970.txt', '006704.txt', '048137.txt' '019275.txt'
+        print(f'picked query: {random_query}')
+        plot_umap(mapper, embedding_dict, random_query, lookup_table)
+    quit(0)
     par = get_parenthesis_freqs_dataset()
     pass
 # TODO: Translate the queries and the evidence files to a common language (English)
