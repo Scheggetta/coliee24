@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 SEEDS = [62, 7, 1984]
 EPOCHS = 25
 SAVE_BEST_WEIGHTS = True
+METRIC = 'precision'
 
 
 def create_training(training_dataloader, q_dataloader, d_dataloader):
@@ -22,9 +23,9 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
             set_random_seeds(s)
             scores.append(max(train(model, training_dataloader, (q_dataloader, d_dataloader),
                                     num_epochs=EPOCHS, lr=lr, pe_weight=pe_weight, factor=factor, threshold=threshold,
-                                    max_docs=int(max_docs), patience=patience, cooldown=cooldown,
+                                    max_docs=int(max_docs), patience=patience, cooldown=cooldown, metric=METRIC,
                                     cosine_loss_margin=cosine_loss_margin, ratio_max_similarity=ratio_max_similarity,
-                                    pe_cutoff=pe_cutoff, save_weights=False, verbose=False)['val_f1_score']))
+                                    pe_cutoff=pe_cutoff, save_weights=False, verbose=True)[METRIC]))
             print(f'F1 score for seed {s}: {scores[-1]}')
         return sum(scores) / len(scores)
 

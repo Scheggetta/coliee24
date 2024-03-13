@@ -85,14 +85,15 @@ def contrastive_loss_function(similarity_metric, query, positives, negatives):
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
           factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS, verbose=True,
-          cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
+          cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF,
+          metric='val_f1_score'):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
     loss_function = contrastive_loss_function
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=factor, threshold=threshold,
                                                               patience=patience, cooldown=cooldown)
 
-    history = {'train_loss': [], 'val_loss': [], 'val_f1_score': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_f1_score': [], 'precision': [], 'recall': []}
 
     model = model.to('cuda')
 
@@ -136,8 +137,11 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
         val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score = metrics
         history['val_loss'].append(val_loss)
         history['val_f1_score'].append(f1_score)
+        history['precision'].append(precision)
+        history['recall'].append(recall)
+        current_metric = history[metric][-1]
 
-        lr_scheduler.step(val_loss)
+        lr_scheduler.step(current_metric)
         if verbose:
             pbar.set_description(
                 f'Epoch {epoch + 1}/{num_epochs} - loss:{train_loss:.3f} - v_loss:{val_loss:.3f} - '
@@ -147,13 +151,13 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
             pbar.update()
 
         if save_weights:
-            if epoch == 0 or f1_score > max(history['val_f1_score'][:-1]):
+            if epoch == 0 or current_metric > max(history[metric][:-1]):
                 # print(f'New best model found (val_loss = {val_loss})! Saving it...')
                 best_weights = model.state_dict()
 
     if save_weights:
         model.load_state_dict(best_weights)
-        model.save_weights(params={'val_f1': max(history['val_f1_score'])})
+        model.save_weights(params={metric: max(history[metric])})
 
     if verbose:
         pbar.close()
@@ -267,11 +271,12 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
 
             correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
             retrieved_cases += len(targets[targets == 1])
-            precision = correctly_retrieved_cases / retrieved_cases
-            recall = correctly_retrieved_cases / relevant_cases
-            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
             d_dataloader.dataset.restore()
+
+    precision = correctly_retrieved_cases / retrieved_cases
+    recall = correctly_retrieved_cases / relevant_cases
+    f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
     val_loss /= (pe_count + ne_count)
     # pe_val_loss /= pe_count
