@@ -12,6 +12,9 @@ scipy
 matplotlib
 seaborn
 bayesian-optimization
+umap-learn
+umap-learn[plot]
+dask-expr
 
 pyYAML
 gdown
