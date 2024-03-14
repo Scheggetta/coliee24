@@ -12,7 +12,7 @@ from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
 
-seed = 243
+seed = 1984
 print(f'Setting seed to {seed}')
 random.seed(seed)
 np.random.seed(seed)
@@ -127,5 +127,7 @@ if __name__ == '__main__':
             pbar.set_description(f'val_loss: {val_loss / (pe_count + ne_count):.3f} - '
                                  f'pe_val_loss: {pe_val_loss / pe_count:.3f} - '
                                  f'ne_val_loss: {ne_val_loss / ne_count:.3f} - '
+                                 f'pre: {precision:.4f} - '
+                                 f'rec: {recall:.4f} - '
                                  f'f1: {f1_score:.4f}')
             pbar.update()

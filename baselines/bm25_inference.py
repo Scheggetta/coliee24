@@ -17,7 +17,7 @@ from setlist import SetList
 from pathlib import Path
 
 
-seed = 62
+seed = 1984
 print(f'Setting seed to {seed}')
 random.seed(seed)
 np.random.seed(seed)
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
     json_path = Path.joinpath(Path('Dataset'), Path(f'task1_{PREPROCESSING_DATASET_TYPE}_labels_2024.json'))
     json_dict = json.load(open(json_path))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.0001)
+    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
     val_files = []
     for key, values in val_dict.items():
@@ -122,5 +122,7 @@ if __name__ == '__main__':
         f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
         i += 1
-        pbar.set_description(f'f1: {f1_score:.4f}')
+        pbar.set_description(f'pre: {precision:.4f} - '
+                             f'rec: {recall:.4f} - '
+                             f'f1: {f1_score:.4f}')
         pbar.update()

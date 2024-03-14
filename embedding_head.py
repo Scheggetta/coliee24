@@ -75,33 +75,32 @@ class EmbeddingHead(torch.nn.Module):
         self.load_state_dict(torch.load(file_path))
 
 
-def contrastive_loss_function(loss_fn, query, positives, negatives, targets):
-    loss = torch.tensor(0.0).to('cuda')
-    for el in positives:
-        pe_dot = torch.einsum('ij,j->', query, el)
-        ne_dot = torch.einsum('ij,ij->i', query, negatives)
-        logits = torch.cat((pe_dot.unsqueeze(0), ne_dot))
-        loss += loss_fn(logits, targets)
-    return loss / positives.size()[0]
+def train(model,
+          train_dataloader,
+          validation_dataloader,
+          num_epochs=30,
+          save_weights=True,
+          optimizer=None,
+          loss_function=None,
+          cosine_loss_margin=COSINE_LOSS_MARGIN,
+          lr_scheduler=None,
+          pe_weight=PE_WEIGHT,
+          max_docs=MAX_DOCS,
+          ratio_max_similarity=RATIO_MAX_SIMILARITY,
+          pe_cutoff=PE_CUTOFF,
+          metric='val_f1_score',
+          verbose=True
+          ):
 
-    # negative_contribution = torch.sum(torch.exp(similarity_metric(query, negatives)))
-    # loss_score = torch.tensor(0.0).to('cuda')
-    # for el in positives:
-    #     positive_contribution = torch.exp(similarity_metric(query, el))[0]
-    #     loss_score += -torch.log(positive_contribution / (positive_contribution + negative_contribution))
-    # return loss_score / positives.size()[0]
-
-
-def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
-          factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS, verbose=True,
-          cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF,
-          metric='val_f1_score'):
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
-    loss_function = contrastive_loss_function
-    inner_loss_fn = torch.nn.CrossEntropyLoss()
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=factor, threshold=threshold,
-                                                              patience=patience, cooldown=cooldown, mode='max') # FIXME: mode
+    if optimizer is None:
+        optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    if lr_scheduler is None:
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
+                                                                  patience=PATIENCE, cooldown=COOLDOWN, mode='min')
+        if metric in ['precision', 'recall', 'val_f1_score']:
+            lr_scheduler.mode = 'max'
+    if loss_function is None:
+        loss_function = cosine_loss_function
 
     history = {'train_loss': [], 'val_loss': [], 'val_f1_score': [], 'precision': [], 'recall': []}
 
@@ -127,18 +126,13 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
-            targets = torch.zeros(SAMPLE_SIZE + 1).to('cuda')
-            targets[0] = 1
-            # loss = compute_loss(query_out, pe_out, ne_out, loss_function, pe_weight)
-            loss = compute_contrastive_loss(query_out, pe_out, ne_out, loss_function, inner_loss_fn, targets)
+            loss = loss_function(query_out, pe_out, ne_out, cosine_loss_margin, pe_weight)
             loss.backward()
 
             optimizer.step()
 
             train_loss += loss.item()
             i += 1
-
-        # lr_scheduler.step()
 
         train_loss /= i
         history['train_loss'].append(train_loss)
@@ -155,11 +149,11 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
         lr_scheduler.step(current_metric)
         if verbose:
-            pbar.set_description(
-                f'Epoch {epoch + 1}/{num_epochs} - loss:{train_loss:.3f} - v_loss:{val_loss:.3f} - '
-                # f'weighted_loss:{weighted_val_loss:.3f} - pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
-                f'pre:{precision:.3f} - rec:{recall:.3f} - f1:{f1_score:.3f} - '
-                f'lr:{lr_scheduler._last_lr[-1]:.1E}')
+            description = f'Epoch {epoch + 1}/{num_epochs} - loss:{train_loss:.3f} - v_loss:{val_loss:.3f} - '
+            if weighted_val_loss is not None:
+                description += f'weighted_loss:{weighted_val_loss:.3f} - pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
+            description += f'pre:{precision:.3f} - rec:{recall:.3f} - f1:{f1_score:.3f} - lr:{lr_scheduler._last_lr[-1]:.1E}'
+            pbar.set_description(description)
             pbar.update()
 
         if save_weights:
@@ -177,8 +171,9 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
     return history
 
 
-def compute_loss(query, pe, ne, loss_function, pe_weight=None):
+def cosine_loss_function(query, pe, ne, cosine_loss_margin, pe_weight=None):
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
+    loss_function = torch.nn.CosineEmbeddingLoss(margin=cosine_loss_margin, reduction='none')
 
     loss = torch.tensor(0.0).to('cuda')
     for idx, query_el in enumerate(query):
@@ -200,26 +195,15 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
-def compute_contrastive_loss(query, pe, ne, loss_function, inner_loss_fn, targets):
-    loss = torch.tensor(0.0).to('cuda')
-    for idx, query_el in enumerate(query):
-        query_el = query_el.unsqueeze(0)
-        pe_el = pe[idx]
-        ne_el = ne[idx]
-
-        loss += loss_function(inner_loss_fn, query_el, pe_el, ne_el, targets)
-    return loss / len(query)
-
-
 def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=False,
                    ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF, max_docs=MAX_DOCS):
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
     model.eval()
 
     q_dataloader, d_dataloader = validation_dataloader
-    # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
-    loss_function = contrastive_loss_function
-    inner_loss_fn = torch.nn.CrossEntropyLoss()
+    loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
+    # loss_function = contrastive_loss_function
+    # inner_loss_fn = torch.nn.CrossEntropyLoss()
 
     val_loss = torch.tensor(0.0).to('cuda')
     pe_val_loss = torch.tensor(0.0).to('cuda')
@@ -261,27 +245,29 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
                 ne_count += len(ne_out)
 
                 # negative_contribution += torch.sum(torch.exp(model.cs(query_out, ne_out)))
-                negative_contribution = torch.cat((negative_contribution, torch.einsum('ij,ij->i', query_out, ne_out)))
-                for el in pe_out:
-                    pc = torch.einsum('ij,j->', query_out, el)
-                    positive_contributions = torch.cat((positive_contributions, pc.unsqueeze(0)))
+
+                # negative_contribution = torch.cat((negative_contribution, torch.einsum('ij,ij->i', query_out, ne_out)))
+                # for el in pe_out:
+                #     pc = torch.einsum('ij,j->', query_out, el)
+                #     positive_contributions = torch.cat((positive_contributions, pc.unsqueeze(0)))
 
                 # val_loss += loss_function(model.cs, query_out, pe_out, ne_out)
-            # val_loss += loss_function(query_out, doc_out, targets).sum()
-            # if len(pe_out) > 0:
-            #     pe_val_loss += loss_function(query_out, pe_out, torch.ones(len(pe_out)).to('cuda')).sum()
-            # if len(ne_out) > 0:
-            #     ne_val_loss += loss_function(query_out, ne_out, -torch.ones(len(ne_out)).to('cuda')).sum()
 
-            assert len(positive_contributions) == len(pe), 'Positive contributions must be equal to the number of positive evidences'
-            loss_score = torch.tensor(0.0).to('cuda')
-            loss_targets = torch.zeros(1 + len(negative_contribution)).to('cuda')
-            loss_targets[0] = 1
-            for positive in positive_contributions:
-                logits = torch.cat((positive.unsqueeze(0), negative_contribution))
-                loss_score += inner_loss_fn(logits, loss_targets)
-            loss_score /= len(positive_contributions)
-            val_loss += loss_score
+                val_loss += loss_function(query_out, doc_out, targets).sum()
+                if len(pe_out) > 0:
+                    pe_val_loss += loss_function(query_out, pe_out, torch.ones(len(pe_out)).to('cuda')).sum()
+                if len(ne_out) > 0:
+                    ne_val_loss += loss_function(query_out, ne_out, -torch.ones(len(ne_out)).to('cuda')).sum()
+
+            # assert len(positive_contributions) == len(pe), 'Positive contributions must be equal to the number of positive evidences'
+            # loss_score = torch.tensor(0.0).to('cuda')
+            # loss_targets = torch.zeros(1 + len(negative_contribution)).to('cuda')
+            # loss_targets[0] = 1
+            # for positive in positive_contributions:
+            #     logits = torch.cat((positive.unsqueeze(0), negative_contribution))
+            #     loss_score += inner_loss_fn(logits, loss_targets)
+            # loss_score /= len(positive_contributions)
+            # val_loss += loss_score
 
             # F1 score
             similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
@@ -308,17 +294,17 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     recall = correctly_retrieved_cases / relevant_cases
     f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
-    val_loss /= len(q_dataloader)
-    # val_loss /= (pe_count + ne_count)
-    # pe_val_loss /= pe_count
-    # ne_val_loss /= ne_count
-    # if pe_weight is not None:
-    #     weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
-    # else:
-    #     weighted_val_loss = None
+    # val_loss /= len(q_dataloader)
+    val_loss /= (pe_count + ne_count)
+    pe_val_loss /= pe_count
+    ne_val_loss /= ne_count
+    if pe_weight is not None:
+        weighted_val_loss = pe_weight * pe_val_loss + (1 - pe_weight) * ne_val_loss
+    else:
+        weighted_val_loss = None
 
-    # return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
-    return val_loss, None, pe_val_loss, ne_val_loss, precision, recall, f1_score
+    return val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
+    # return val_loss, None, pe_val_loss, ne_val_loss, precision, recall, f1_score
 
 
 def get_best_weights():
@@ -328,7 +314,7 @@ def get_best_weights():
 
 
 if __name__ == '__main__':
-    set_random_seeds(623)
+    set_random_seeds(600)
     if PREPROCESSING_DATASET_TYPE == 'train':
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         split_ratio = 0.9
@@ -349,7 +335,15 @@ if __name__ == '__main__':
         d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
 
         model = EmbeddingHead().to('cuda')
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 50, metric='precision')
+        # train(model, training_dataloader, (q_dataloader, d_dataloader), 30, metric='val_loss')
+        optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
+                                                                  patience=PATIENCE, cooldown=COOLDOWN)
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 30,
+              metric='val_f1_score',
+              optimizer=optimizer,
+              loss_function=contrastive_loss_function,
+              lr_scheduler=lr_scheduler)
     else:
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
@@ -362,7 +356,7 @@ if __name__ == '__main__':
 
         model = EmbeddingHead().to('cuda')
         # model.load_weights(Path(get_best_weights()))
-        model.load_weights(Path('Checkpoints/weights_13_03_19-25-59_precision_0.19055118110236222.pt'))
+        model.load_weights(Path('Checkpoints/weights_14_03_12-48-37_val_loss_0.2682577073574066.pt'))
         print('Beginning test procedure...')
         results = evaluate_model(model, (q_dataloader, d_dataloader),
                                  pe_weight=PE_WEIGHT,

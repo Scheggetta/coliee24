@@ -4,6 +4,7 @@ import shutil
 import json
 from functools import reduce
 from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -50,38 +51,30 @@ def baseline_F1(pred, gt):
             'recall': recall, 'n_guesses': len(pred)}
 
 
+def contrastive_loss_function(query, pe, ne, cosine_loss_margin=None, pe_weight=None):
+    loss_function = torch.nn.CrossEntropyLoss(reduction='none')
+
+    loss = torch.tensor(0.0).to('cuda')
+    for idx, query_el in enumerate(query):
+        query_el = query_el.unsqueeze(0)
+        pe_el = pe[idx]
+        ne_el = ne[idx]
+
+        query_loss = torch.tensor(0.0).to('cuda')
+        ne_dot = torch.einsum('ij,ij->i', query_el, ne_el)
+        targets = torch.zeros(len(ne_dot) + 1).to('cuda')
+        targets[0] = 1
+
+        for el in pe_el:
+            pe_dot = torch.einsum('ij,j->', query_el, el)
+            logits = torch.cat((pe_dot.unsqueeze(0), ne_dot))
+            loss += loss_function(logits, targets)
+        query_loss += query_loss / len(pe_el)
+
+    return loss / len(query)
+
+
 def set_random_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-
-# q = (1, 2, 3)
-# e = (2, 3, 3)
-# q = torch.Tensor([[[1, 2, 1], [1, 2, 1]]])
-# e = torch.Tensor([[[-1, 2, 3], [-2, -1, 1], [0, 0, 1]], [[-1, -1, -1], [0, -1, 1], [0, 0, 0]]])
-# x = torch.matmul(q, torch.transpose(e, 1, 2))
-#
-# x2 = torch.einsum('ijk,lmk->jlm', [q, e])
-#
-# q = torch.rand(1, 512, 768)
-# e = torch.rand(10, 512, 768)
-# x = torch.matmul(q, torch.transpose(e, 1, 2))
-# x2 = torch.einsum('ijk,ljk->l', [q, e])
-#
-# q = torch.rand(1, 512, 768)
-# e = torch.rand(10, 512, 768)
-# q = torch.mean(q, dim=1)
-# e = torch.mean(e, dim=1)
-# cos = torch.nn.CosineSimilarity()
-# x = cos(q, e)
-#
-# # q = (1, 5)
-# # e = (3, 5)
-# q = torch.Tensor([[1, 2, 3, 4, 5]])
-# attn = torch.Tensor([1, 1, 0, 0, 0])
-# q = q * attn
-# q = torch.squeeze(q)
-# e = torch.Tensor([[1, 2, -1, 4, -2], [1, -1, 3, 4, -1], [-1, -1, -1, -1, 5]])
-# x = torch.matmul(q, torch.transpose(e, 0, 1))
-# x = cos(q, e)
-

@@ -7,23 +7,25 @@ from bayes_opt import BayesianOptimization
 import matplotlib.pyplot as plt
 
 # TODO: do gris search on both train() and evaluate_model()
-SEEDS = [62, 7, 1984]
-EPOCHS = 25
+SEEDS = [23, 7, 1984]
+EPOCHS = 30
 SAVE_BEST_WEIGHTS = True
-METRIC = 'precision'
+METRIC = 'val_f1_score'
 
 
 def create_training(training_dataloader, q_dataloader, d_dataloader):
     def black_box_function(lr=LR, pe_weight=PE_WEIGHT, factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE,
                            cooldown=COOLDOWN, hidden_units=HIDDEN_UNITS, cosine_loss_margin=COSINE_LOSS_MARGIN,
-                           max_docs=MAX_DOCS, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF):
+                           max_docs=MAX_DOCS, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF,
+                           sample_size=SAMPLE_SIZE):
         model = EmbeddingHead(hidden_units=hidden_units).to('cuda')
         scores = []
+        set_sample_size(int(sample_size))
         for s in SEEDS:
             set_random_seeds(s)
             scores.append(max(train(model, training_dataloader, (q_dataloader, d_dataloader),
-                                    num_epochs=EPOCHS, lr=lr, pe_weight=pe_weight, factor=factor, threshold=threshold,
-                                    max_docs=int(max_docs), patience=patience, cooldown=cooldown, metric=METRIC,
+                                    num_epochs=EPOCHS, pe_weight=pe_weight,
+                                    max_docs=int(max_docs), metric=METRIC,
                                     cosine_loss_margin=cosine_loss_margin, ratio_max_similarity=ratio_max_similarity,
                                     pe_cutoff=pe_cutoff, save_weights=False, verbose=True)[METRIC]))
             print(f'F1 score for seed {s}: {scores[-1]}')
@@ -52,11 +54,8 @@ if __name__ == '__main__':
     q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
     d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
-    pbounds = {'lr': (0.0001, 0.001),
-               'threshold': (0.0001, 0.005),
-               'patience': (3, 7),
-               'cosine_loss_margin': (0.1, 0.6),
-               'ratio_max_similarity': (0.9, 0.99),
+    pbounds = {'sample_size': (15, 200),
+               'hidden_units': (200, 1000),
                }
 
     optimizer = BayesianOptimization(
@@ -66,8 +65,8 @@ if __name__ == '__main__':
     )
     print(f'Beginning optimization of {len(pbounds)} params with {len(SEEDS)} seeds...')
     optimizer.maximize(
-        init_points=3,
-        n_iter=6,
+        init_points=5,
+        n_iter=10,
     )
 
     print("Best parameters combination: \n\t{}".format(optimizer.max))

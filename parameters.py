@@ -21,17 +21,17 @@ COSINE_LOSS_MARGIN = 0.4  # 0.5
 LR = 0.001          # 0.001
 FACTOR = 0.1        # 0.1
 THRESHOLD = 0.001    # 0.001
-PATIENCE = 30       # 3
+PATIENCE = 5       # 3
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
-DYNAMIC_CUTOFF = True        # True
+DYNAMIC_CUTOFF = False        # True
 PE_CUTOFF = 5                # 5
 MAX_DOCS = 10                # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.9
 
 # BM25
-BM25_TOP_N = 5   # 5
+BM25_TOP_N = 20   # 5
 
 # Regularization
 DROPOUT_RATE = 0.0  # 0.2
