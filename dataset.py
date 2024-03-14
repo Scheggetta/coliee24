@@ -50,7 +50,7 @@ class TrainingDataset(Dataset):
             except ValueError:
                 pass
 
-        negative_evidences_names = random.sample(list(sample_space), SAMPLE_SIZE)
+        negative_evidences_names = random.sample(list(sample_space), get_sample_size())
 
         negative_evidences = torch.empty((0, EMB_IN))
         for e_name in negative_evidences_names:
