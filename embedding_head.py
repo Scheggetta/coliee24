@@ -16,9 +16,8 @@ from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_colla
 
 # TODO:
 #  - hyperparameter grid search (parallel inference to save time?)
-#  - print precision and recall
-#  - BM25 baseline
 #  - learning to rank
+#  - check that repeated evidences don't influence loss and evaluation functions and f1 score
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -76,24 +75,33 @@ class EmbeddingHead(torch.nn.Module):
         self.load_state_dict(torch.load(file_path))
 
 
-def contrastive_loss_function(similarity_metric, query, positives, negatives):
-    negative_contribution = torch.sum(torch.exp(similarity_metric(query, negatives)))
-    loss_score = torch.tensor(0.0).to('cuda')
+def contrastive_loss_function(loss_fn, query, positives, negatives, targets):
+    loss = torch.tensor(0.0).to('cuda')
     for el in positives:
-        positive_contribution = torch.exp(similarity_metric(query, el))[0]
-        loss_score += -torch.log(positive_contribution / (positive_contribution + negative_contribution))
-    return loss_score / positives.size()[0]
+        pe_dot = torch.einsum('ij,j->', query, el)
+        ne_dot = torch.einsum('ij,ij->i', query, negatives)
+        logits = torch.cat((pe_dot.unsqueeze(0), ne_dot))
+        loss += loss_fn(logits, targets)
+    return loss / positives.size()[0]
+
+    # negative_contribution = torch.sum(torch.exp(similarity_metric(query, negatives)))
+    # loss_score = torch.tensor(0.0).to('cuda')
+    # for el in positives:
+    #     positive_contribution = torch.exp(similarity_metric(query, el))[0]
+    #     loss_score += -torch.log(positive_contribution / (positive_contribution + negative_contribution))
+    # return loss_score / positives.size()[0]
 
 
 def train(model, train_dataloader, validation_dataloader, num_epochs, save_weights=True, lr=LR, pe_weight=PE_WEIGHT,
           factor=FACTOR, threshold=THRESHOLD, patience=PATIENCE, cooldown=COOLDOWN, max_docs=MAX_DOCS, verbose=True,
           cosine_loss_margin=COSINE_LOSS_MARGIN, ratio_max_similarity=RATIO_MAX_SIMILARITY, pe_cutoff=PE_CUTOFF,
           metric='val_f1_score'):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none', margin=cosine_loss_margin)
     loss_function = contrastive_loss_function
+    inner_loss_fn = torch.nn.CrossEntropyLoss()
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=factor, threshold=threshold,
-                                                              patience=patience, cooldown=cooldown)
+                                                              patience=patience, cooldown=cooldown, mode='max') # FIXME: mode
 
     history = {'train_loss': [], 'val_loss': [], 'val_f1_score': [], 'precision': [], 'recall': []}
 
@@ -119,8 +127,10 @@ def train(model, train_dataloader, validation_dataloader, num_epochs, save_weigh
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
+            targets = torch.zeros(SAMPLE_SIZE + 1).to('cuda')
+            targets[0] = 1
             # loss = compute_loss(query_out, pe_out, ne_out, loss_function, pe_weight)
-            loss = compute_contrastive_loss(query_out, pe_out, ne_out, loss_function, model.cs)
+            loss = compute_contrastive_loss(query_out, pe_out, ne_out, loss_function, inner_loss_fn, targets)
             loss.backward()
 
             optimizer.step()
@@ -190,14 +200,14 @@ def compute_loss(query, pe, ne, loss_function, pe_weight=None):
     return loss / len(query)
 
 
-def compute_contrastive_loss(query, pe, ne, loss_function, similarity_function):
+def compute_contrastive_loss(query, pe, ne, loss_function, inner_loss_fn, targets):
     loss = torch.tensor(0.0).to('cuda')
     for idx, query_el in enumerate(query):
         query_el = query_el.unsqueeze(0)
         pe_el = pe[idx]
         ne_el = ne[idx]
 
-        loss += loss_function(similarity_function, query_el, pe_el, ne_el)
+        loss += loss_function(inner_loss_fn, query_el, pe_el, ne_el, targets)
     return loss / len(query)
 
 
@@ -209,6 +219,7 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     q_dataloader, d_dataloader = validation_dataloader
     # loss_function = torch.nn.CosineEmbeddingLoss(reduction='none')
     loss_function = contrastive_loss_function
+    inner_loss_fn = torch.nn.CrossEntropyLoss()
 
     val_loss = torch.tensor(0.0).to('cuda')
     pe_val_loss = torch.tensor(0.0).to('cuda')
@@ -220,8 +231,6 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
     retrieved_cases = 0
     relevant_cases = 0
 
-    negative_contribution = torch.tensor(0.0).to('cuda')
-
     with torch.no_grad():
         for q_name, q_emb in q_dataloader:
             d_dataloader.dataset.mask(q_name[0])
@@ -231,7 +240,8 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
             relevant_cases += len(pe)
 
             similarities = []
-            positive_contributions = []
+            positive_contributions = torch.Tensor([]).to('cuda')
+            negative_contribution = torch.Tensor([]).to('cuda')
 
             for d_name, d_emb in d_dataloader:
                 q_emb = q_emb.to('cuda')
@@ -247,25 +257,29 @@ def evaluate_model(model, validation_dataloader, pe_weight=None, dynamic_cutoff=
 
                 pe_out = doc_out[targets == 1]
                 pe_count += len(pe_out)
-                ne = doc_out[targets == -1]
-                ne_count += len(ne)
+                ne_out = doc_out[targets == -1]
+                ne_count += len(ne_out)
 
-                negative_contribution += torch.sum(torch.exp(model.cs(query_out, ne)))
+                # negative_contribution += torch.sum(torch.exp(model.cs(query_out, ne_out)))
+                negative_contribution = torch.cat((negative_contribution, torch.einsum('ij,ij->i', query_out, ne_out)))
                 for el in pe_out:
-                    positive_contribution = torch.exp(model.cs(query_out, el))[0]
-                    positive_contributions.append(positive_contribution)
+                    pc = torch.einsum('ij,j->', query_out, el)
+                    positive_contributions = torch.cat((positive_contributions, pc.unsqueeze(0)))
 
-                # val_loss += loss_function(model.cs, query_out, pe, ne)
+                # val_loss += loss_function(model.cs, query_out, pe_out, ne_out)
             # val_loss += loss_function(query_out, doc_out, targets).sum()
-            # if len(pe) > 0:
-            #     pe_val_loss += loss_function(query_out, pe, torch.ones(len(pe)).to('cuda')).sum()
-            # if len(ne) > 0:
-            #     ne_val_loss += loss_function(query_out, ne, -torch.ones(len(ne)).to('cuda')).sum()
+            # if len(pe_out) > 0:
+            #     pe_val_loss += loss_function(query_out, pe_out, torch.ones(len(pe_out)).to('cuda')).sum()
+            # if len(ne_out) > 0:
+            #     ne_val_loss += loss_function(query_out, ne_out, -torch.ones(len(ne_out)).to('cuda')).sum()
 
             assert len(positive_contributions) == len(pe), 'Positive contributions must be equal to the number of positive evidences'
             loss_score = torch.tensor(0.0).to('cuda')
+            loss_targets = torch.zeros(1 + len(negative_contribution)).to('cuda')
+            loss_targets[0] = 1
             for positive in positive_contributions:
-                loss_score += -torch.log(positive / (positive + negative_contribution))
+                logits = torch.cat((positive.unsqueeze(0), negative_contribution))
+                loss_score += inner_loss_fn(logits, loss_targets)
             loss_score /= len(positive_contributions)
             val_loss += loss_score
 
@@ -335,7 +349,7 @@ if __name__ == '__main__':
         d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
 
         model = EmbeddingHead().to('cuda')
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 30, metric='precision')
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 50, metric='precision')
     else:
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
         test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
@@ -348,7 +362,7 @@ if __name__ == '__main__':
 
         model = EmbeddingHead().to('cuda')
         # model.load_weights(Path(get_best_weights()))
-        model.load_weights(Path('Checkpoints/weights_10_03_15-33-04_val_f1_0.2617124394184169.pt'))
+        model.load_weights(Path('Checkpoints/weights_13_03_19-25-59_precision_0.19055118110236222.pt'))
         print('Beginning test procedure...')
         results = evaluate_model(model, (q_dataloader, d_dataloader),
                                  pe_weight=PE_WEIGHT,

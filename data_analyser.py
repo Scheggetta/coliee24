@@ -347,32 +347,38 @@ def get_embedding_dict():
     return embedding_dict
 
 
-def get_mapper(embedding_dict, save=False, save_path='Dataset/umap_mapper.pkl'):
-    if Path('Dataset/umap_mapper.pkl').exists():
-        return pickle.load(open('Dataset/umap_mapper.pkl', 'rb'))
+def get_mapper(embedding_dict, save=False, save_path='Dataset/umap_mapper_7.pkl'):
+    if Path('Dataset/umap_mapper_7.pkl').exists():
+        return pickle.load(open('Dataset/umap_mapper_7.pkl', 'rb'))
 
     if save:
-        mapper = umap.UMAP().fit(list(embedding_dict.values()))
+        mapper = umap.UMAP(metric='cosine', n_neighbors=15, min_dist=.1, n_epochs=1000).fit(list(embedding_dict.values()))
         with open(save_path, 'wb') as f:
             pickle.dump(mapper, f)
         return mapper
     else:
-        return umap.UMAP().fit(list(embedding_dict.values()))
+        return umap.UMAP(metric='cosine').fit(list(embedding_dict.values()))
 
 
 def plot_umap(mapper, embedding_dict, query, trans_dict):
     query_map = mapper.transform(embedding_dict[query].reshape(1, -1))
     evidences = trans_dict[query]
     fig = plt.figure()
-    ax = fig.gca()
-    ax.scatter(mapper.embedding_[:, 0], mapper.embedding_[:, 1], s=2)
-    ax.scatter(query_map[:, 0], query_map[:, 1], s=2, color='r', label=f'{query}')
+    # ax = fig.gca()
+    # umap.plot.points(mapper)
+    # umap.plot.connectivity(mapper, edge_bundling='hammer')
+    umap.plot.diagnostic(mapper, diagnostic_type='pca')
+    # umap.plot.diagnostic(mapper, diagnostic_type='local_dim')
+    # umap.plot.diagnostic(mapper, diagnostic_type='all')
+    # umap.plot.diagnostic(mapper, diagnostic_type='vq')
+    # ax.scatter(mapper.embedding_[:, 0], mapper.embedding_[:, 1], s=2)
+    plt.scatter(query_map[:, 0], query_map[:, 1], s=2, color='r', label=f'{query}')
     for ev in evidences:
         evidence_map = mapper.transform(embedding_dict[ev].reshape(1, -1))
-        ax.scatter(evidence_map[:, 0], evidence_map[:, 1], s=2, color='m', label=f'{ev}')
-        ax.annotate(f'{ev}', xy=(evidence_map[:, 0], evidence_map[:, 1]), xytext=(evidence_map[:, 0]-.05, evidence_map[:, 1]-.05),
+        plt.scatter(evidence_map[:, 0], evidence_map[:, 1], s=2, color='m', label=f'{ev}')
+        plt.annotate(f'{ev}', xy=(evidence_map[:, 0], evidence_map[:, 1]), xytext=(evidence_map[:, 0]-.05, evidence_map[:, 1]-.05),
                     fontsize=4)
-    ax.legend()
+    plt.legend()
     plt.show()
 
 
@@ -380,9 +386,9 @@ if __name__ == '__main__':
     lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
     queries = list(lookup_table.keys())
     embedding_dict = get_embedding_dict()
-    mapper = get_mapper(embedding_dict)
-    for i in range(10):
-        random_query = random.choice(queries)  # '072217.txt', '097970.txt', '006704.txt', '048137.txt' '019275.txt'
+    mapper = get_mapper(embedding_dict, True)
+    for i in range(1):
+        random_query = random.choice(queries)  # '071181''072217.txt', '097970.txt', '006704.txt', '048137.txt' '019275.txt'
         print(f'picked query: {random_query}')
         plot_umap(mapper, embedding_dict, random_query, lookup_table)
     quit(0)
