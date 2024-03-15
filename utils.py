@@ -74,6 +74,10 @@ def contrastive_loss_function(query, pe, ne, cosine_loss_margin=None, pe_weight=
     return loss / len(query)
 
 
+def dot_similarity(query, doc):
+    return torch.einsum('ij,ij->i', query, doc)
+
+
 def set_random_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
