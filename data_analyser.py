@@ -382,6 +382,23 @@ def plot_umap(mapper, embedding_dict, query, trans_dict):
     plt.show()
 
 
+def extract_dates():
+    dates_dict = {}
+    months_list = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    month = '(?:' + '|'.join(months_list) + ')'
+    for folder in [Path.joinpath(Path('Dataset'), Path(f)) for f in ['task1_train_files_2024', 'task1_test_files_2024']]:
+        for filename, text in [(x, open(Path.joinpath(folder, Path(x)), encoding='utf-8').read()) for x in os.listdir(folder)]:
+            dates = re.findall(month + r' \d{1,2}, \d{4}', text)
+            dates += re.findall(r'\d{1,2} ' + month + r' \d{4}', text)
+            timestamps = [date.split(' ')[-1] for date in dates]
+            timestamps.sort(reverse=True)
+            dates_dict[filename] = timestamps[0] if timestamps else None
+    json_path = Path.joinpath(Path('Dataset'), Path('dates.json'))
+    with open(json_path, 'w') as f:
+        json.dump(dates_dict, f, indent=4)
+    return dates_dict
+
+
 if __name__ == '__main__':
     lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
     queries = list(lookup_table.keys())

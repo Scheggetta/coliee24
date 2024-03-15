@@ -6,11 +6,11 @@ FRENCH_THRESHOLD = 0.4
 # TODO: maybe add dropout or change architecture
 EMB_IN = 1536
 EMB_OUT = 50            # 50
-HIDDEN_UNITS = 650      # 256
+HIDDEN_UNITS = 240      # 650
 
 # Torch Dataset
 # TODO: maybe the negative samples should be taken from the most similar documents according to BM25 (and also increase sample size)
-SAMPLE_SIZE = 15        # 15 - Negative samples per query
+SAMPLE_SIZE = 100        # 15 - Negative samples per query
 
 # Loss function
 PE_WEIGHT = None          # None
