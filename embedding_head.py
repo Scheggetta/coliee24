@@ -1,5 +1,6 @@
 import os
 import json
+import warnings
 from pathlib import Path
 from datetime import datetime
 
@@ -10,6 +11,7 @@ from tqdm import tqdm
 from utils import set_random_seeds
 from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
+
 
 # TODO:
 #  - hyperparameter grid search (parallel inference to save time?)
@@ -34,8 +36,8 @@ class EmbeddingHead(torch.nn.Module):
             pe = [self.relu(self.linear1(x)) for x in pe]
             pe = [self.linear2(self.dropout(x)) for x in pe]
 
-            ne = self.relu(self.linear1(ne))
-            ne = self.linear2(self.dropout(ne))
+            ne = [self.relu(self.linear1(x)) for x in ne]
+            ne = [self.linear2(self.dropout(x)) for x in ne]
 
             return query, pe, ne
         else:
@@ -86,13 +88,13 @@ def train(model,
           verbose=True,
           **kwargs
           ):
-
     if optimizer is None:
-        print('WARNING: `optimizer` of `train` function is set to None. Using Adam with default learning rate.')
+        warnings.warn('WARNING: `optimizer` of `train` function is set to None. Using Adam with default learning rate.')
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
     if lr_scheduler is None:
-        print('WARNING: `lr_scheduler` of `train` function is set to None. Using ReduceLROnPlateau with default params.')
+        warnings.warn(
+            'WARNING: `lr_scheduler` of `train` function is set to None. Using ReduceLROnPlateau with default params.')
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN,
                                                                   mode=lr_scheduler_mode)
@@ -134,6 +136,23 @@ def train(model,
 
             query_out, pe_out, ne_out = model(query, pe, ne)
 
+            # ne_out = ne_out[loss_function(ne_out) > 0]
+            mask_losses = []
+
+            if HARD_NEGATIVE_MINING:
+                with torch.no_grad():
+                    query_out, pe_out, ne_out = model(query, pe, ne)
+                    # ne_out = ne_out.detach().to('cpu').tolist()
+                    ne_filtered = []
+                    for idx, ne_el in enumerate(ne_out):
+                        # ne_el = torch.Tensor(ne_el).to('cuda')
+                        ne_filtered.append(ne[idx][val_loss_function(query_out[idx].unsqueeze(0), ne_el,
+                                                                     -torch.ones(len(ne_el)).to('cuda')) > 0])
+
+                query_out, pe_out, ne_out = model(query, pe, ne_filtered)
+            else:
+                query_out, pe_out, ne_out = model(query, pe, ne)
+
             loss = loss_function(query_out, pe_out, ne_out, cosine_loss_margin, pe_weight)
             loss.backward()
 
@@ -168,14 +187,14 @@ def train(model,
             if pe_weight is not None:
                 description += f'weighted_loss:{weighted_val_loss:.3f} - pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
             else:
-                description += f'weighted_loss:n/a - pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
+                description += f'pe_loss:{pe_val_loss:.3f} - ne_loss:{ne_val_loss:.3f} - '
             description += f'pre:{precision:.3f} - rec:{recall:.3f} - f1:{f1_score:.3f} - lr:{lr_scheduler._last_lr[-1]:.1E}'
             pbar.set_description(description)
             pbar.update()
 
         if save_weights:
             if epoch == 0 or \
-                lr_scheduler_mode == 'max' and current_metric > max(history[metric][:-1]) or \
+                    lr_scheduler_mode == 'max' and current_metric > max(history[metric][:-1]) or \
                     lr_scheduler_mode == 'min' and current_metric < min(history[metric][:-1]):
                 best_weights = model.state_dict()
 
@@ -224,14 +243,11 @@ def iterate_dataset_with_model(model,
                                max_docs=None,
                                val_loss_function=None,
                                score_function=None,
-                               iterator_mode=False,
-                               suppress_warnings=False
+                               iterator_mode=False
                                ):
-
     if model is None:
-        if suppress_warnings:
-            print('WARNING: `model` of `iterate_dataset_with_model` function is set to None. No embedding '
-                  'transformation will be done.')
+        warnings.warn('WARNING: `model` of `iterate_dataset_with_model` function is set to None. No embedding '
+                      'transformation will be done.')
 
         def model(query, doc):
             return query, doc
@@ -241,20 +257,19 @@ def iterate_dataset_with_model(model,
         model.eval()
 
     if val_loss_function is None:
-        if suppress_warnings:
-            print('WARNING: `val_loss_function` of `iterate_dataset_with_model` function is set to None. Loss won\'t '
-                  'be computed.')
+        warnings.warn(
+            'WARNING: `val_loss_function` of `iterate_dataset_with_model` function is set to None. Loss won\'t '
+            'be computed.')
     if score_function is None:
-        if suppress_warnings:
-            print('WARNING: `score_function` of `iterate_dataset_with_model` function is set to None. Metrics won\'t '
-                  'be computed.')
+        warnings.warn(
+            'WARNING: `score_function` of `iterate_dataset_with_model` function is set to None. Metrics won\'t '
+            'be computed.')
     if score_function is None and val_loss_function is not None:
-        if suppress_warnings:
-            print('WARNING: are you sure you want to compute loss without computing metrics?')
+        warnings.warn('WARNING: are you sure you want to compute loss without computing metrics?')
     if not iterator_mode and val_loss_function is None and score_function is None:
-        if suppress_warnings:
-            print('WARNING: both `val_loss_function` and `score_function` of `iterate_dataset_with_model` function are '
-                  'set to None. No operation, except for iterating over the dataloader, will be performed.')
+        warnings.warn(
+            'WARNING: both `val_loss_function` and `score_function` of `iterate_dataset_with_model` function are '
+            'set to None. No operation, except for iterating over the dataloader, will be performed.')
 
     if score_function is not None and (not dynamic_cutoff and pe_cutoff is None):
         raise ValueError('`pe_cutoff` must be set if `dynamic_cutoff` is set to False')
@@ -274,6 +289,9 @@ def iterate_dataset_with_model(model,
     correctly_retrieved_cases = 0
     retrieved_cases = 0
     relevant_cases = 0
+
+    if PREPROCESSING_DATASET_TYPE == 'test':
+        pbar = tqdm(total=len(q_dataloader), desc='Testing')
 
     with torch.no_grad():
         for q_name, q_emb in q_dataloader:
@@ -334,6 +352,8 @@ def iterate_dataset_with_model(model,
                 correctly_retrieved_cases += len(gt[(gt == 1) & (predictions == 1)])
                 retrieved_cases += len(predictions[predictions == 1])
 
+            if PREPROCESSING_DATASET_TYPE == 'test':
+                pbar.update()
             d_dataloader.dataset.restore()
 
     if score_function is not None:
@@ -359,6 +379,8 @@ def iterate_dataset_with_model(model,
         pe_val_loss = -1
         ne_val_loss = -1
 
+    if PREPROCESSING_DATASET_TYPE == 'test':
+        pbar.close()
     if not iterator_mode:
         yield val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
         return
@@ -375,9 +397,8 @@ if __name__ == '__main__':
     set_random_seeds(600)
     if PREPROCESSING_DATASET_TYPE == 'train':
         json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
-        split_ratio = 0.9
-        train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
-        print(f'Building Dataset with split ratio {split_ratio}...')
+        train_dict, val_dict = split_dataset(json_dict, split_ratio=SPLIT_RATIO)
+        print(f'Building Dataset with split ratio {SPLIT_RATIO}...')
 
         training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
                                                  selected_dict=train_dict)
@@ -397,7 +418,7 @@ if __name__ == '__main__':
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN)
 
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 3,
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 30,
               metric='val_f1_score',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)
@@ -412,15 +433,14 @@ if __name__ == '__main__':
         d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
-        # model.load_weights(Path(get_best_weights()))
-        model.load_weights(Path('Checkpoints/weights_15_03_01-42-17_val_f1_score_0.25179856115107907.pt'))
-        print('Beginning test procedure...')
+        model.load_weights(Path('Checkpoints/weights_16_03_14-54-27_val_f1_score_0.2094298245614035.pt'))
 
         val_loss_function = torch.nn.CosineEmbeddingLoss(margin=COSINE_LOSS_MARGIN, reduction='none')
         # dot product or cosine similarity?
         from utils import dot_similarity
-        # score_function = torch.nn.CosineSimilarity(dim=1)
-        score_function = dot_similarity
+
+        score_function = torch.nn.CosineSimilarity(dim=1)
+        # score_function = dot_similarity
 
         results = iterate_dataset_with_model(model, (q_dataloader, d_dataloader),
                                              pe_weight=PE_WEIGHT,
@@ -428,8 +448,9 @@ if __name__ == '__main__':
                                              ratio_max_similarity=RATIO_MAX_SIMILARITY,
                                              pe_cutoff=PE_CUTOFF,
                                              max_docs=MAX_DOCS,
-                                             val_loss_function=None,
+                                             val_loss_function=val_loss_function,
                                              score_function=score_function)
-        print(f'Test set: {next(results)}')
-
+        res = next(results)
+        print(f'Test set results:\n val_loss: {res[0]}, weighted_val_loss: {res[1]}, pe_val_loss: {res[2]}, '
+              f'ne_val_loss: {res[3]}, precision: {res[4]}, recall: {res[5]}, f1_score: {res[6]}')
     print('done')

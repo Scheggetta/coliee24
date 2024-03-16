@@ -1,16 +1,18 @@
 # Preprocessing
-PREPROCESSING_DATASET_TYPE = 'train'  # 'train' or 'test'
+PREPROCESSING_DATASET_TYPE = 'test'  # 'train' or 'test'
 FRENCH_THRESHOLD = 0.4
 
 # Embedding head
 # TODO: maybe add dropout or change architecture
 EMB_IN = 1536
 EMB_OUT = 50            # 50
-HIDDEN_UNITS = 240      # 650
+HIDDEN_UNITS = 650      # 650
 
 # Torch Dataset
 # TODO: maybe the negative samples should be taken from the most similar documents according to BM25 (and also increase sample size)
-SAMPLE_SIZE = 100        # 15 - Negative samples per query
+SAMPLE_SIZE = 50        # 15 - Negative samples per query
+SPLIT_RATIO = 0.8       # 0.9
+HARD_NEGATIVE_MINING = False
 
 # Loss function
 PE_WEIGHT = None          # None
@@ -25,8 +27,8 @@ PATIENCE = 5        # 3
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
-DYNAMIC_CUTOFF = False        # True
-PE_CUTOFF = 20                # 5
+DYNAMIC_CUTOFF = True        # True
+PE_CUTOFF = 5                # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.9
 
