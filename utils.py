@@ -85,4 +85,17 @@ def set_random_seeds(seed):
     torch.manual_seed(seed)
 
 
+def average_negative_evidences(tensor_list):
+    total_length = 0
+    num_tensors = len(tensor_list)
+
+    for tensor in tensor_list:
+        total_length += len(tensor)
+
+    if num_tensors == 0:
+        return 0  # return 0 if the list is empty to avoid division by zero
+
+    return total_length / num_tensors
+
+
 

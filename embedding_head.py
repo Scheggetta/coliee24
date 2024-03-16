@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils import set_random_seeds
+from utils import set_random_seeds, average_negative_evidences
 from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
@@ -118,6 +118,8 @@ def train(model,
 
     if verbose:
         pbar = tqdm(total=num_epochs, desc='Training')
+    if HARD_NEGATIVE_MINING:
+        starting_size = SAMPLE_SIZE
 
     best_weights = model.state_dict()
     for epoch in range(num_epochs):
@@ -133,11 +135,6 @@ def train(model,
             ne = ne.to('cuda')
 
             optimizer.zero_grad()
-
-            query_out, pe_out, ne_out = model(query, pe, ne)
-
-            # ne_out = ne_out[loss_function(ne_out) > 0]
-            mask_losses = []
 
             if HARD_NEGATIVE_MINING:
                 with torch.no_grad():
@@ -162,6 +159,7 @@ def train(model,
             i += 1
 
         train_loss /= i
+
         history['train_loss'].append(train_loss)
 
         # Evaluate the model on the validation set
@@ -386,8 +384,8 @@ def iterate_dataset_with_model(model,
         return
 
 
-def get_best_weights():
-    weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt')]
+def get_best_weights(metric='val_f1_score'):
+    weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt') and metric in x]
     best_path = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))[-1]
     return Path.joinpath(Path('Checkpoints'), Path(best_path))
 
@@ -418,7 +416,7 @@ if __name__ == '__main__':
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN)
 
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 30,
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 50,
               metric='val_f1_score',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)
@@ -433,7 +431,7 @@ if __name__ == '__main__':
         d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
-        model.load_weights(Path('Checkpoints/weights_16_03_14-54-27_val_f1_score_0.2094298245614035.pt'))
+        model.load_weights(get_best_weights('val_f1_score'))
 
         val_loss_function = torch.nn.CosineEmbeddingLoss(margin=COSINE_LOSS_MARGIN, reduction='none')
         # dot product or cosine similarity?

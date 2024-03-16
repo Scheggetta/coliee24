@@ -11,8 +11,8 @@ HIDDEN_UNITS = 650      # 650
 # Torch Dataset
 # TODO: maybe the negative samples should be taken from the most similar documents according to BM25 (and also increase sample size)
 SAMPLE_SIZE = 50        # 15 - Negative samples per query
-SPLIT_RATIO = 0.8       # 0.9
-HARD_NEGATIVE_MINING = False
+SPLIT_RATIO = 0.95      # 0.9
+HARD_NEGATIVE_MINING = False  # True
 
 # Loss function
 PE_WEIGHT = None          # None
@@ -21,14 +21,14 @@ COSINE_LOSS_MARGIN = 0.4  # 0.5
 # LR scheduler
 # TODO: AdamW instead of Adam?
 LR = 0.001          # 0.001
-FACTOR = 0.1        # 0.1
+FACTOR = 0.2        # 0.1
 THRESHOLD = 0.001   # 0.001
 PATIENCE = 5        # 3
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
 DYNAMIC_CUTOFF = True        # True
-PE_CUTOFF = 5                # 5
+PE_CUTOFF = 20                # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.9
 
