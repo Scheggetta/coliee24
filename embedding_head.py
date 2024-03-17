@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils import set_random_seeds, average_negative_evidences
+from utils import set_random_seeds, average_negative_evidences, get_best_weights
 from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
 
@@ -241,7 +241,8 @@ def iterate_dataset_with_model(model,
                                max_docs=None,
                                val_loss_function=None,
                                score_function=None,
-                               iterator_mode=False
+                               iterator_mode=False,
+                               score_iterator_mode=False
                                ):
     if model is None:
         warnings.warn('WARNING: `model` of `iterate_dataset_with_model` function is set to None. No embedding '
@@ -273,6 +274,10 @@ def iterate_dataset_with_model(model,
         raise ValueError('`pe_cutoff` must be set if `dynamic_cutoff` is set to False')
     if score_function is not None and (dynamic_cutoff and (ratio_max_similarity is None or max_docs is None)):
         raise ValueError('`ratio_max_similarity` and `max_docs` must be set if `dynamic_cutoff` is set to True')
+    if score_iterator_mode and score_function is None:
+        raise ValueError('`score_function` must be set if `score_iterator_mode` is set to True')
+    if score_iterator_mode and iterator_mode:
+        raise ValueError('`iterator_mode` and `score_iterator_mode` cannot be set to True at the same time')
 
     assert pe_weight is None or 0 <= pe_weight <= 1, 'Positive evidence weight must be between 0 and 1'
 
@@ -342,6 +347,10 @@ def iterate_dataset_with_model(model,
                 predicted_pe_names = [x[0] for x in predicted_pe]
                 predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
 
+                if score_iterator_mode:
+                    predicted_pe_scores = [x[1] for x in predicted_pe]
+                    yield predicted_pe_scores
+
                 gt = torch.zeros(len(similarities))
                 gt[pe_idxs] = 1
                 predictions = torch.zeros(len(similarities))
@@ -379,15 +388,9 @@ def iterate_dataset_with_model(model,
 
     if PREPROCESSING_DATASET_TYPE == 'test':
         pbar.close()
-    if not iterator_mode:
+    if not iterator_mode and not score_iterator_mode:
         yield val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
         return
-
-
-def get_best_weights(metric='val_f1_score'):
-    weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt') and metric in x]
-    best_path = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))[-1]
-    return Path.joinpath(Path('Checkpoints'), Path(best_path))
 
 
 if __name__ == '__main__':

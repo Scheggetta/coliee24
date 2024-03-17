@@ -8,6 +8,7 @@ tqdm
 numpy
 pandas
 scikit-learn
+catboost
 scipy
 matplotlib
 seaborn
