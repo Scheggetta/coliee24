@@ -420,7 +420,7 @@ if __name__ == '__main__':
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN)
 
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 50,
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 30,
               metric='val_f1_score',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)
