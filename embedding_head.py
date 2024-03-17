@@ -232,6 +232,7 @@ def cosine_loss_function(query, pe, ne, cosine_loss_margin, pe_weight):
     return loss / len(query)
 
 
+# TODO: i think 'default parameters' should have a real meaning
 def iterate_dataset_with_model(model,
                                validation_dataloader,
                                pe_weight=None,
@@ -293,7 +294,7 @@ def iterate_dataset_with_model(model,
     retrieved_cases = 0
     relevant_cases = 0
 
-    if PREPROCESSING_DATASET_TYPE == 'test':
+    if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
         pbar = tqdm(total=len(q_dataloader), desc='Testing')
 
     with torch.no_grad():
@@ -348,8 +349,8 @@ def iterate_dataset_with_model(model,
                 predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
 
                 if score_iterator_mode:
-                    predicted_pe_scores = [x[1] for x in predicted_pe]
-                    yield predicted_pe_scores
+                    # predicted_pe_scores = [x[1] for x in predicted_pe]
+                    yield predicted_pe
 
                 gt = torch.zeros(len(similarities))
                 gt[pe_idxs] = 1
@@ -359,7 +360,7 @@ def iterate_dataset_with_model(model,
                 correctly_retrieved_cases += len(gt[(gt == 1) & (predictions == 1)])
                 retrieved_cases += len(predictions[predictions == 1])
 
-            if PREPROCESSING_DATASET_TYPE == 'test':
+            if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
                 pbar.update()
             d_dataloader.dataset.restore()
 
@@ -386,7 +387,7 @@ def iterate_dataset_with_model(model,
         pe_val_loss = -1
         ne_val_loss = -1
 
-    if PREPROCESSING_DATASET_TYPE == 'test':
+    if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
         pbar.close()
     if not iterator_mode and not score_iterator_mode:
         yield val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score

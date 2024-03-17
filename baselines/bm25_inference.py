@@ -15,12 +15,7 @@ from parameters import *
 from dataset import split_dataset
 from setlist import SetList
 from pathlib import Path
-
-
-seed = 1984
-print(f'Setting seed to {seed}')
-random.seed(seed)
-np.random.seed(seed)
+from utils import set_random_seeds
 
 
 def lowercase(text):
@@ -66,8 +61,20 @@ class BM25Custom(BM25Okapi):
 
         return top_n
 
+    def get_top_n_indexes_scores(self, query, n):
+        scores = self.get_scores(query)
+        top_n = [(idx, score) for idx, score in enumerate(scores)]
+        top_n = sorted(top_n, key=lambda x: x[1], reverse=True)[:n]
+
+        # threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
+        # predicted_pe = [x for x in similarities if x[1] >= threshold]
+        # predicted_pe = predicted_pe[:MAX_DOCS] if len(predicted_pe) > MAX_DOCS else predicted_pe
+
+        return top_n
+
 
 if __name__ == '__main__':
+    set_random_seeds(1984)
     folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
     json_path = Path.joinpath(Path('Dataset'), Path(f'task1_{PREPROCESSING_DATASET_TYPE}_labels_2024.json'))
     json_dict = json.load(open(json_path))

@@ -10,18 +10,14 @@ from torcheval.metrics.functional import binary_f1_score
 
 from parameters import *
 from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
+from utils import set_random_seeds
 
-
-seed = 1984
-print(f'Setting seed to {seed}')
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
 
 WHOLE_DATASET = False
 
 
 if __name__ == '__main__':
+    set_random_seeds(1984)
     if PREPROCESSING_DATASET_TYPE == 'train':
         json_dict = json.load(open('Dataset/task1_train_labels_2024.json'))
         train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)

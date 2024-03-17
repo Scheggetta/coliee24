@@ -1,5 +1,5 @@
 # Preprocessing
-PREPROCESSING_DATASET_TYPE = 'test'  # 'train' or 'test'
+PREPROCESSING_DATASET_TYPE = 'train'  # 'train' or 'test'
 FRENCH_THRESHOLD = 0.4
 
 # Embedding head
@@ -11,7 +11,7 @@ HIDDEN_UNITS = 650      # 650
 # Torch Dataset
 # TODO: maybe the negative samples should be taken from the most similar documents according to BM25 (and also increase sample size)
 SAMPLE_SIZE = 50        # 15 - Negative samples per query
-SPLIT_RATIO = 0.95      # 0.9
+SPLIT_RATIO = 0.1      # 0.9
 HARD_NEGATIVE_MINING = False  # True
 
 # Loss function
