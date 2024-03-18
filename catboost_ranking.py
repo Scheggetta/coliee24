@@ -4,6 +4,7 @@ import warnings
 from pathlib import Path
 from datetime import datetime
 import pickle
+import math
 
 import torch
 from torch.utils.data import DataLoader
@@ -36,27 +37,54 @@ def create_tabular_datasets():
     val_group_id, val_features, val_labels = \
         get_tabular_features(val_dict, train_preprocessing_folder_path, train_embeddings_folder_path)
 
+    normalization_model = train_normalization_model(train_features, val_features)
+    train_features = normalization_model(train_features)
+    val_features = normalization_model(val_features)
+
     test_dict = json.load(open('Dataset/task1_test_labels_2024_reduced.json'))
     test_preprocessing_folder_path = 'Dataset/translated_test'
     test_embeddings_folder_path = 'Dataset/gpt_embed_test'
 
     test_group_id, test_features, test_labels = \
         get_tabular_features(test_dict, test_preprocessing_folder_path, test_embeddings_folder_path)
+    test_features = normalization_model(test_features)
 
-    train_pool = Pool(data=train_features, label=train_labels, group_id=train_group_id)
-    val_pool = Pool(data=val_features, label=val_labels, group_id=val_group_id)
-    test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)
+    dataset = {
+        'train': (train_group_id, train_features, train_labels),
+        'val': (val_group_id, val_features, val_labels),
+        'test': (test_group_id, test_features, test_labels),
+        'normalization_model': normalization_model
+    }
 
-    train_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
-    val_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
-    test_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
+    with open('Dataset/tabular_dataset.pkl', 'wb') as f:
+        pickle.dump(dataset, f)
 
-    # Save the pools
-    train_pool.save('Dataset/train_pool.bin')
-    val_pool.save('Dataset/val_pool.bin')
-    test_pool.save('Dataset/test_pool.bin')
 
-    return train_pool, val_pool, test_pool
+class Normalizer:
+    def __init__(self, params):
+        self.params = params
+
+    def __call__(self, x):
+        normalized_x = []
+        n_cols = len(self.params)
+        for i in range(len(x)):
+            normalized_row = [(x[i][j] - self.params[j][0]) / math.sqrt(self.params[j][1] ** 2 + 1e-3) for j in range(n_cols)]
+            normalized_x.append(normalized_row)
+        return normalized_x
+
+
+def train_normalization_model(train_features, val_features):
+    # Concatenate train and val features
+    features = train_features + val_features
+    # Train normalization model
+    n_cols = len(features[0])
+    params = []
+    for i in range(n_cols):
+        mean = sum([x[i] for x in features]) / len(features)
+        std = math.sqrt(sum([(x[i] - mean) ** 2 for x in features]) / (len(features) - 1))
+        params.append((mean, std))
+
+    return Normalizer(params)
 
 
 def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folder_path):
@@ -130,4 +158,22 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
 
 if __name__ == '__main__':
     create_tabular_datasets()
+
+    # Load the pools
+    with open('Dataset/tabular_dataset.pkl', 'rb') as f:
+        dataset = pickle.load(f)
+    train_group_id, train_features, train_labels = dataset['train']
+    val_group_id, val_features, val_labels = dataset['val']
+    test_group_id, test_features, test_labels = dataset['test']
+    normalization_model = dataset['normalization_model']
+
+    train_pool = Pool(data=train_features, label=train_labels, group_id=train_group_id)
+    val_pool = Pool(data=val_features, label=val_labels, group_id=val_group_id)
+    test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)
+
+    train_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
+    val_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
+    test_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
+
+
     print('Done!')
