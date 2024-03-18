@@ -33,9 +33,9 @@ def create_tabular_datasets():
     train_dict, val_dict = split_dataset(train_dict, split_ratio=SPLIT_RATIO)
     print(f'Building Dataset with split ratio {SPLIT_RATIO}...')
 
-    train_group_id, train_features, train_labels = \
+    train_group_id, train_features, train_labels, train_evidence_names = \
         get_tabular_features(train_dict, train_preprocessing_folder_path, train_embeddings_folder_path)
-    val_group_id, val_features, val_labels = \
+    val_group_id, val_features, val_labels, val_evidence_names = \
         get_tabular_features(val_dict, train_preprocessing_folder_path, train_embeddings_folder_path)
 
     normalization_model = train_normalization_model(train_features, val_features)
@@ -46,14 +46,14 @@ def create_tabular_datasets():
     test_preprocessing_folder_path = 'Dataset/translated_test'
     test_embeddings_folder_path = 'Dataset/gpt_embed_test'
 
-    test_group_id, test_features, test_labels = \
+    test_group_id, test_features, test_labels, test_evidence_names = \
         get_tabular_features(test_dict, test_preprocessing_folder_path, test_embeddings_folder_path)
     test_features = normalization_model(test_features)
 
     dataset = {
-        'train': (train_group_id, train_features, train_labels),
-        'val': (val_group_id, val_features, val_labels),
-        'test': (test_group_id, test_features, test_labels),
+        'train': (train_group_id, train_features, train_labels, train_evidence_names),
+        'val': (val_group_id, val_features, val_labels, val_evidence_names),
+        'test': (test_group_id, test_features, test_labels, test_evidence_names),
         'normalization_model': normalization_model
     }
 
@@ -121,12 +121,13 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
 
     top_n_scores = [x for x in iterate_dataset_with_model(recall_model,
                                                           (q_dataloader, d_dataloader),
-                                                          pe_cutoff=SAMPLE_SIZE,
+                                                          pe_cutoff=PE_CUTOFF,
                                                           score_function=SIMILARITY_FUNCTION_DIM_1,
                                                           score_iterator_mode=True)]
 
     pbar = tqdm(total=len(q_preprocessed_corpus), desc='Creating tabular dataset')
 
+    evidence_names = []
     group_id = []
     features = []
     labels = []
@@ -150,22 +151,51 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
         d_names = [x[0] for x in recall_model_scores]
         # TODO: it could happen that the labels computed for a group are all zeros. Check if this breaks catboost
         labels.extend([1 if x in pe_names else 0 for x in d_names])
+        evidence_names.extend(d_names)
 
         pbar.update(1)
     pbar.close()
 
-    return group_id, features, labels
+    return group_id, features, labels, evidence_names
 
 
-def predict(scores, targets):
+def apply_cutoff(arr):
+    threshold = arr[0] * CATBOOST_SIM_RATIO
+    mask = arr < threshold
+    arr[mask] = 0
+    arr[~mask] = 1
+    return arr
+
+
+def convert_scores(scores, targets):
     results = np.stack((scores, targets), axis=2)
-    results = np.sort(results, axis=1)
+    results[:, ::-1, :].sort(axis=1)
+    # Shape: (n_queries, pe_cutoff, 2)
+    np.apply_along_axis(apply_cutoff, 1, results[:, :, 0])
+    return results
 
-    return scores
+
+def get_metrics(results, missed_positives):
+    results = results.reshape(-1, 2)
+    tp = np.sum(results[:, 0] * results[:, 1])
+    fp = np.sum(results[:, 0] * (1 - results[:, 1]))
+    fn = np.sum((1 - results[:, 0]) * results[:, 1]) + missed_positives
+
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    f1_score = 2 * (precision * recall) / (precision + recall)
+
+    return precision, recall, f1_score
 
 
-def get_metrics(scores, targets):
-    pass
+def get_missed_positives(e_list):
+    json_dict = json.load(open(Path.joinpath(Path('Dataset'), Path(f'task1_test_labels_2024.json'))))
+    missed_positives = 0
+    for q in json_dict.keys():
+        for e in set(json_dict[q]):
+            if e not in e_list:
+                missed_positives += 1
+    return missed_positives
 
 
 if __name__ == '__main__':
@@ -196,11 +226,11 @@ if __name__ == '__main__':
     Y = model.predict(test_pool)
 
     n_queries = len(set(test_group_id))
-    Y = Y.reshape(n_queries, SAMPLE_SIZE)
-    gt = np.array(test_labels).reshape(n_queries, SAMPLE_SIZE)
-    results = np.stack((Y, gt), axis=2)
+    Y = Y.reshape(n_queries, PE_CUTOFF)
+    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
 
-    Y, gt = predict(Y, gt)
-    metrics = get_metrics(Y, gt)
+    res = convert_scores(Y, gt)
+    metrics = get_metrics(res, missed_positives=0)
+    print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
 
     print('Done!')

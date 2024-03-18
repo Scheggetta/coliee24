@@ -28,7 +28,7 @@ COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
 DYNAMIC_CUTOFF = True         # False
-PE_CUTOFF = 5                 # 5
+PE_CUTOFF = 20                 # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.95
 
@@ -37,6 +37,9 @@ BM25_TOP_N = 5   # 5
 
 # Regularization
 DROPOUT_RATE = 0.0  # 0.2
+
+# Catboost
+CATBOOST_SIM_RATIO = 0.9  # 0.9
 
 
 def set_sample_size(n):
