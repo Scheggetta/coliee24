@@ -10,21 +10,16 @@ from utils import set_random_seeds
 
 
 # TODO: do grid search on both train() and evaluate_model()
-SEEDS = [7, 23, 512, 1984]
+SEEDS = [2, 1984]
 EPOCHS = 30
-split_ratio = 0.8
-SPLIT_SEED = 57
 SAVE_BEST_WEIGHTS = False
-METRIC = 'recall'
+METRIC = 'val_f1_score'
 
 OPTIMIZER_SEED = 42
-INIT_POINTS = 5
-N_ITER = 15
+INIT_POINTS = 1
+N_ITER = 0
 
-PBOUNDS = {'sample_size': (15, 250),
-           'hidden_units': (100, 1000),
-           'cosine_loss_margin': (-0.1, 0.7),
-           }
+PBOUNDS = {}
 
 if METRIC in ['precision', 'recall', 'val_f1_score']:
     lr_scheduler_mode = 'max'
@@ -51,17 +46,18 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
                            pe_cutoff=PE_CUTOFF,
                            sample_size=SAMPLE_SIZE):
 
-        model = (EmbeddingHead(hidden_units=int(hidden_units), emb_out=int(emb_out), dropout_rate=dropout_rate)
-                 .to('cuda'))
-        _optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        _lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(_optimizer, mode=lr_scheduler_mode, factor=factor,
-                                                                   patience=int(patience), cooldown=int(cooldown),
-                                                                   threshold=threshold)
-
         scores = []
-        set_sample_size(int(sample_size))
         for s in SEEDS:
             set_random_seeds(s)
+
+            model = (EmbeddingHead(hidden_units=int(hidden_units), emb_out=int(emb_out), dropout_rate=dropout_rate)
+                     .to('cuda'))
+            _optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            _lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(_optimizer, mode=lr_scheduler_mode, factor=factor,
+                                                                       patience=int(patience), cooldown=int(cooldown),
+                                                                       threshold=threshold)
+
+            set_sample_size(int(sample_size))
             scores.append(max(train(model=model,
                                     train_dataloader=training_dataloader,
                                     validation_dataloader=(q_dataloader, d_dataloader),
@@ -79,7 +75,7 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
                                     ratio_max_similarity=ratio_max_similarity,
                                     pe_cutoff=int(pe_cutoff),
                                     metric=METRIC,
-                                    save_weights=False,
+                                    save_weights=True,
                                     verbose=True
                                     )[METRIC]
                               )
@@ -91,12 +87,7 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
 
 
 if __name__ == '__main__':
-    set_random_seeds(SPLIT_SEED)
-    json_path = Path.joinpath(Path('Dataset'), Path(f'task1_train_labels_2024.json'))
-    json_dict = json.load(open(json_path))
-
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=split_ratio)
-    print(f'Building dataset with split ratio {split_ratio}...')
+    train_dict, val_dict = split_dataset(load=True)
 
     training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                              selected_dict=train_dict)

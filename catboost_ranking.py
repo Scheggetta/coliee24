@@ -157,7 +157,10 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
     return group_id, features, labels
 
 
-def predict(scores):
+def predict(scores, targets):
+    results = np.stack((scores, targets), axis=2)
+    results = np.sort(results, axis=1)
+
     return scores
 
 
@@ -188,7 +191,7 @@ if __name__ == '__main__':
     # Train the model
     model = CatBoostRanker(loss_function='YetiRank', task_type='GPU')
     model.fit(train_pool, eval_set=val_pool, verbose=False)
-    model.save_model('catboost_model.torroni')
+    model.save_model('catboost_model.bin')
 
     Y = model.predict(test_pool)
 
@@ -197,7 +200,7 @@ if __name__ == '__main__':
     gt = np.array(test_labels).reshape(n_queries, SAMPLE_SIZE)
     results = np.stack((Y, gt), axis=2)
 
-    Y = predict(Y)
+    Y, gt = predict(Y, gt)
     metrics = get_metrics(Y, gt)
 
     print('Done!')

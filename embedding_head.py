@@ -395,12 +395,13 @@ def iterate_dataset_with_model(model,
 
 
 if __name__ == '__main__':
+    # json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
+    # split_dataset(json_dict, seed=57)
+    # quit()
+
     # TODO: refactor datasets' generation (put the code in a function)
-    set_random_seeds(600)
     if PREPROCESSING_DATASET_TYPE == 'train':
-        json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
-        train_dict, val_dict = split_dataset(json_dict, split_ratio=SPLIT_RATIO)
-        print(f'Building Dataset with split ratio {SPLIT_RATIO}...')
+        train_dict, val_dict = split_dataset(load=True)
 
         training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
                                                  selected_dict=train_dict)
@@ -415,12 +416,14 @@ if __name__ == '__main__':
         q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
         d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
 
+        set_random_seeds(2)
+
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN)
 
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 30,
+        train(model, training_dataloader, (q_dataloader, d_dataloader), 10,
               metric='val_f1_score',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)

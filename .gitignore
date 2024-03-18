@@ -64,6 +64,7 @@ target/
 # Project specific
 Dataset/
 Checkpoints/
+catboost_info/
 
 en_fr.argosmodel
 fr_en.argosmodel

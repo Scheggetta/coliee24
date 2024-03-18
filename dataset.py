@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 
 from setlist import SetList
 from parameters import *
+from utils import set_random_seeds
 
 
 class TrainingDataset(Dataset):
@@ -158,12 +159,30 @@ def get_gpt_embeddings(folder_path: Path, selected_dict: dict):
     return embeddings
 
 
-def split_dataset(json_dict, split_ratio=0.9):
+def split_dataset(json_dict=None, split_ratio=0.8, seed=42, save=True, load=False):
+    if not load and json_dict is None:
+        raise ValueError('json_dict is None and load is False')
+
+    if load:
+        with open('Dataset/train_dict.pkl', 'rb') as f:
+            train_dict = pickle.load(f)
+        with open('Dataset/val_dict.pkl', 'rb') as f:
+            val_dict = pickle.load(f)
+        return train_dict, val_dict
+
+    set_random_seeds(seed)
+
     keys = list(json_dict.keys())
     random.shuffle(keys)
 
     train_size = ceil(len(json_dict) * split_ratio)
     train_dict = {key: json_dict[key] for key in keys[:train_size]}
     val_dict = {key: json_dict[key] for key in keys[train_size:]}
+
+    if save:
+        with open('Dataset/train_dict.pkl', 'wb') as f:
+            pickle.dump(train_dict, f)
+        with open('Dataset/val_dict.pkl', 'wb') as f:
+            pickle.dump(val_dict, f)
 
     return train_dict, val_dict
