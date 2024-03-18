@@ -6,6 +6,7 @@ from datetime import datetime
 import pickle
 import math
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -120,7 +121,7 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
 
     top_n_scores = [x for x in iterate_dataset_with_model(recall_model,
                                                           (q_dataloader, d_dataloader),
-                                                          pe_cutoff=20,
+                                                          pe_cutoff=SAMPLE_SIZE,
                                                           score_function=SIMILARITY_FUNCTION_DIM_1,
                                                           score_iterator_mode=True)]
 
@@ -156,8 +157,17 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
     return group_id, features, labels
 
 
+def predict(scores):
+    return scores
+
+
+def get_metrics(scores, targets):
+    pass
+
+
 if __name__ == '__main__':
-    create_tabular_datasets()
+    # create_tabular_datasets()
+    # quit()
 
     # Load the pools
     with open('Dataset/tabular_dataset.pkl', 'rb') as f:
@@ -175,5 +185,19 @@ if __name__ == '__main__':
     val_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
     test_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
 
+    # Train the model
+    model = CatBoostRanker(loss_function='YetiRank', task_type='GPU')
+    model.fit(train_pool, eval_set=val_pool, verbose=False)
+    model.save_model('catboost_model.torroni')
+
+    Y = model.predict(test_pool)
+
+    n_queries = len(set(test_group_id))
+    Y = Y.reshape(n_queries, SAMPLE_SIZE)
+    gt = np.array(test_labels).reshape(n_queries, SAMPLE_SIZE)
+    results = np.stack((Y, gt), axis=2)
+
+    Y = predict(Y)
+    metrics = get_metrics(Y, gt)
 
     print('Done!')

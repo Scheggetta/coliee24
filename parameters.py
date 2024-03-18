@@ -10,8 +10,8 @@ HIDDEN_UNITS = 650      # 650
 
 # Torch Dataset
 # TODO: maybe the negative samples should be taken from the most similar documents according to BM25 (and also increase sample size)
-SAMPLE_SIZE = 50        # 15 - Negative samples per query
-SPLIT_RATIO = 0.7      # 0.9
+SAMPLE_SIZE = 20        # 15 - Negative samples per query
+SPLIT_RATIO = 0.9      # 0.9
 HARD_NEGATIVE_MINING = False  # True
 
 # Loss function
