@@ -6,6 +6,7 @@ import json
 from functools import reduce
 import numpy as np
 import pickle
+from sklearn.metrics import f1_score
 
 
 def import_corpus(train=True):
@@ -100,8 +101,12 @@ def tf_idf(save_model=True, save_results=True, split_ratio=0.8, threshold=None, 
 
 # TODO:
 #    - Find a way to deal with validation set (since there could be some troubles with the dataset indexes) (if needed)
-#    - Implement the function to compute the f1_score to use it as a baseline
-#    - Load the model and the X matrix from the pickle files if the files exist
+
+
+def compute_f1_score(results, json_dict):
+    predicted = [results[i, j] for i, j in results.keys()]
+    ground_truth = [1 if j in json_dict[i] else 0 for i, j in results.keys()]
+    return f1_score(ground_truth, predicted)
 
 
 if __name__ == '__main__':
