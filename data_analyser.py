@@ -340,11 +340,12 @@ def get_embedding_dict():
         with open(Path.joinpath(Path(embeddings_folder), Path(file)), 'rb') as f:
             e = pickle.load(f)
             n_paragraphs = len(e) // EMB_IN
-            paragraph_count[file] = n_paragraphs
             assert len(e) % EMB_IN == 0
-            e = torch.Tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
-            embedding_dict[file] = e
-    return embedding_dict
+            e = torch.Tensor(e).view(n_paragraphs, EMB_IN)
+            emb = e.mean(dim=0)
+            paragraph_count[file] = e
+            embedding_dict[file] = emb
+    return embedding_dict, paragraph_count
 
 
 def get_mapper(embedding_dict, save=False, save_path='Dataset/umap_mapper_7.pkl'):
@@ -360,10 +361,11 @@ def get_mapper(embedding_dict, save=False, save_path='Dataset/umap_mapper_7.pkl'
         return umap.UMAP(metric='cosine').fit(list(embedding_dict.values()))
 
 
-def plot_umap(mapper, embedding_dict, query, trans_dict):
+def plot_umap(mapper, embedding_dict, paragraphs, query, trans_dict):
     query_map = mapper.transform(embedding_dict[query].reshape(1, -1))
+    paragraphs_map = mapper.transform(paragraphs[query])
     evidences = trans_dict[query]
-    fig = plt.figure()
+    # fig = plt.figure()
     # ax = fig.gca()
     # umap.plot.points(mapper)
     # umap.plot.connectivity(mapper, edge_bundling='hammer')
@@ -373,12 +375,17 @@ def plot_umap(mapper, embedding_dict, query, trans_dict):
     # umap.plot.diagnostic(mapper, diagnostic_type='vq')
     # ax.scatter(mapper.embedding_[:, 0], mapper.embedding_[:, 1], s=2)
     plt.scatter(query_map[:, 0], query_map[:, 1], s=2, color='r', label=f'{query}')
+    colors = ['blue', 'orange', 'violet', 'brown']
+    for par, col in zip(paragraphs_map, colors):
+        plt.scatter(par[0], par[1], s=2, color=col)
+        plt.annotate(f'{col}', xy=(par[0], par[1]), xytext=(par[0]-.05, par[1]-.05),
+                    fontsize=4)
     for ev in evidences:
         evidence_map = mapper.transform(embedding_dict[ev].reshape(1, -1))
-        plt.scatter(evidence_map[:, 0], evidence_map[:, 1], s=2, color='m', label=f'{ev}')
-        plt.annotate(f'{ev}', xy=(evidence_map[:, 0], evidence_map[:, 1]), xytext=(evidence_map[:, 0]-.05, evidence_map[:, 1]-.05),
-                    fontsize=4)
-    plt.legend()
+        # plt.scatter(evidence_map[:, 0], evidence_map[:, 1], s=2, color='m', label=f'{ev}')
+        # plt.annotate(f'{ev}', xy=(evidence_map[:, 0], evidence_map[:, 1]), xytext=(evidence_map[:, 0]-.05, evidence_map[:, 1]-.05),
+        #             fontsize=4)
+    # plt.legend()
     plt.show()
 
 
@@ -402,12 +409,13 @@ def extract_dates():
 if __name__ == '__main__':
     lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
     queries = list(lookup_table.keys())
-    embedding_dict = get_embedding_dict()
-    mapper = get_mapper(embedding_dict, True)
-    for i in range(1):
-        random_query = random.choice(queries)  # '071181''072217.txt', '097970.txt', '006704.txt', '048137.txt' '019275.txt'
+    embedding_dict, paragraph_count = get_embedding_dict()
+    mapper = get_mapper(embedding_dict, False)
+
+    for i in range(1): # '007846.txt'
+        random_query = '098353.txt' # random.choice(queries)  # '071181''072217.txt', '097970.txt', '006704.txt', '048137.txt' '019275.txt'
         print(f'picked query: {random_query}')
-        plot_umap(mapper, embedding_dict, random_query, lookup_table)
+        plot_umap(mapper, embedding_dict, paragraph_count, random_query, lookup_table)
     quit(0)
     par = get_parenthesis_freqs_dataset()
     pass
