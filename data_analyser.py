@@ -419,11 +419,7 @@ if __name__ == '__main__':
     quit(0)
     par = get_parenthesis_freqs_dataset()
     pass
-# TODO: Translate the queries and the evidence files to a common language (English)
-# TODO: Determine the English/French ratio in the dataset
-# TODO: Determine if the French sentences are the translation of the English ones
 
-# You cannot stop me, I will write here
 os.makedirs('Dataset/translated_preprocessed_train', exist_ok=True)
 for filename in os.listdir('Dataset/regex_preprocessed_train'):
     print(filename)

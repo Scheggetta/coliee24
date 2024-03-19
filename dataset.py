@@ -1,11 +1,12 @@
 import os
 import pickle
 import random
+import json
 from math import ceil
 from pathlib import Path
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 from setlist import SetList
 from parameters import *
@@ -18,7 +19,8 @@ class TrainingDataset(Dataset):
         self.json_dict = json_dict
 
         queries_names = [key for key in json_dict if key in embeddings]
-        self.all_evidences = sorted(list(set([evidence for query_name in queries_names for evidence in json_dict[query_name]])))
+        self.all_evidences = sorted(
+            list(set([evidence for query_name in queries_names for evidence in json_dict[query_name]])))
 
         self.queries = []
         for q_name in queries_names:
@@ -186,3 +188,29 @@ def split_dataset(json_dict=None, split_ratio=0.8, seed=42, save=True, load=Fals
             pickle.dump(val_dict, f)
 
     return train_dict, val_dict
+
+
+def create_dataloaders(dataset_type):
+    training_dataloader = None
+    if dataset_type == 'train':
+        train_dict, qd_dict = split_dataset(load=True)
+        training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
+                                                 selected_dict=train_dict)
+
+        dataset = TrainingDataset(training_embeddings, train_dict)
+        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
+    else:
+        qd_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
+
+    qd_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path(f'gpt_embed_{dataset_type}')),
+                                       selected_dict=qd_dict)
+
+    query_dataset = QueryDataset(qd_embeddings, qd_dict)
+    document_dataset = DocumentDataset(qd_embeddings, qd_dict)
+
+    q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
+    d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
+    qd_dataloader = (q_dataloader, d_dataloader)
+
+    return training_dataloader, qd_dataloader
+

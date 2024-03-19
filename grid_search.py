@@ -9,10 +9,9 @@ from embedding_head import *
 from utils import set_random_seeds
 
 
-# TODO: do grid search on both train() and evaluate_model()
 SEEDS = [2, 1984]
 EPOCHS = 30
-SAVE_BEST_WEIGHTS = False
+RETRAIN_ON_BEST = False
 METRIC = 'val_f1_score'
 
 OPTIMIZER_SEED = 42
@@ -29,7 +28,7 @@ else:
     raise ValueError('Invalid metric')
 
 
-def create_training(training_dataloader, q_dataloader, d_dataloader):
+def create_training(training_dataloader, qd_dataloader):
     def black_box_function(hidden_units=HIDDEN_UNITS,
                            emb_out=EMB_OUT,
                            dropout_rate=DROPOUT_RATE,
@@ -60,7 +59,7 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
             set_sample_size(int(sample_size))
             scores.append(max(train(model=model,
                                     train_dataloader=training_dataloader,
-                                    validation_dataloader=(q_dataloader, d_dataloader),
+                                    validation_dataloader=qd_dataloader,
                                     num_epochs=EPOCHS,
                                     optimizer=_optimizer,
                                     # loss_function=_loss_function,          # DEFAULT
@@ -87,25 +86,12 @@ def create_training(training_dataloader, q_dataloader, d_dataloader):
 
 
 if __name__ == '__main__':
-    train_dict, val_dict = split_dataset(load=True)
-
-    training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
-                                             selected_dict=train_dict)
-    validation_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
-                                               selected_dict=val_dict)
-
-    dataset = TrainingDataset(training_embeddings, train_dict)
-    training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
-
-    query_dataset = QueryDataset(validation_embeddings, val_dict)
-    document_dataset = DocumentDataset(validation_embeddings, val_dict)
-    q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-    d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
+    training_dataloader, qd_dataloader = create_dataloaders('train')
 
     pbounds = PBOUNDS
 
     optimizer = BayesianOptimization(
-        f=create_training(training_dataloader, q_dataloader, d_dataloader),
+        f=create_training(training_dataloader, qd_dataloader),
         pbounds=pbounds,
         random_state=OPTIMIZER_SEED,
     )
@@ -141,8 +127,8 @@ if __name__ == '__main__':
         else:
             best_params[param] = optimizer.max['params'][param]
 
-    if SAVE_BEST_WEIGHTS:
-        print('Saving best weights...')
+    if RETRAIN_ON_BEST:
+        print('Re-training on best parameters...')
         model = (EmbeddingHead(hidden_units=best_params['hidden_units'] if 'hidden_units' in best_params else HIDDEN_UNITS,
                                emb_out=best_params['emb_out'] if 'emb_out' in best_params else EMB_OUT,
                                dropout_rate=best_params['dropout_rate'] if 'dropout_rate' in best_params else DROPOUT_RATE)
@@ -157,12 +143,9 @@ if __name__ == '__main__':
                                           threshold=best_params['threshold'] if 'threshold' in best_params else THRESHOLD)
                         )
 
-        # TODO: right now this is not very useful, for two reasons:
-        #  1. This function needs to take in input ALL the best_params and the other default ones (like in the `black_box_function`)
-        #  2. Right now we are not training on the best seed, but a random one
         train(model,
               training_dataloader,
-              (q_dataloader, d_dataloader),
+              qd_dataloader,
               optimizer=optimizer,
               lr_scheduler=lr_scheduler,
               num_epochs=EPOCHS * 2,

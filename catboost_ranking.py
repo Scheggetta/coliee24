@@ -15,39 +15,46 @@ from catboost import CatBoostRanker, Pool
 from utils import set_random_seeds, get_best_weights
 from parameters import *
 from setlist import SetList
-from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
+from dataset import get_gpt_embeddings, create_dataloaders, split_dataset
 from embedding_head import EmbeddingHead, iterate_dataset_with_model
 from baselines.bm25_inference import BM25Custom, tokenize
-
 
 SIMILARITY_FUNCTION_DIM_0 = torch.nn.CosineSimilarity(dim=0)
 SIMILARITY_FUNCTION_DIM_1 = torch.nn.CosineSimilarity(dim=1)
 set_random_seeds(600)
-# TODO: pickle dataset splits before training, so that at the table creation time we refer to the same dataset
 
 
 def create_tabular_datasets():
-    train_dict = json.load(open('Dataset/task1_train_labels_2024_reduced.json'))
-    train_preprocessing_folder_path = 'Dataset/translated_train'
-    train_embeddings_folder_path = 'Dataset/gpt_embed_train'
-    train_dict, val_dict = split_dataset(train_dict, split_ratio=SPLIT_RATIO)
-    print(f'Building Dataset with split ratio {SPLIT_RATIO}...')
-
+    train_dataloader, val_dataloader = create_dataloaders('train')
+    train_dict, val_dict = split_dataset(load=True)
     train_group_id, train_features, train_labels, train_evidence_names = \
-        get_tabular_features(train_dict, train_preprocessing_folder_path, train_embeddings_folder_path)
+        get_tabular_features(qd_dataloader=train_dataloader,
+                             files_dict=train_dict,
+                             embeddings=get_gpt_embeddings(
+                                 folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
+                                 selected_dict=train_dict),
+                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_train')))
     val_group_id, val_features, val_labels, val_evidence_names = \
-        get_tabular_features(val_dict, train_preprocessing_folder_path, train_embeddings_folder_path)
+        get_tabular_features(qd_dataloader=val_dataloader,
+                             files_dict=val_dict,
+                             embeddings=get_gpt_embeddings(
+                                 folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
+                                 selected_dict=val_dict),
+                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_train')))
 
     normalization_model = train_normalization_model(train_features, val_features)
     train_features = normalization_model(train_features)
     val_features = normalization_model(val_features)
 
-    test_dict = json.load(open('Dataset/task1_test_labels_2024_reduced.json'))
-    test_preprocessing_folder_path = 'Dataset/translated_test'
-    test_embeddings_folder_path = 'Dataset/gpt_embed_test'
-
+    _, test_dataloader = create_dataloaders('test')
+    test_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
     test_group_id, test_features, test_labels, test_evidence_names = \
-        get_tabular_features(test_dict, test_preprocessing_folder_path, test_embeddings_folder_path)
+        get_tabular_features(qd_dataloader=test_dataloader,
+                             files_dict=test_dict,
+                             embeddings=get_gpt_embeddings(
+                                 folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_test')),
+                                 selected_dict=test_dict),
+                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_test')))
     test_features = normalization_model(test_features)
 
     dataset = {
@@ -69,7 +76,8 @@ class Normalizer:
         normalized_x = []
         n_cols = len(self.params)
         for i in range(len(x)):
-            normalized_row = [(x[i][j] - self.params[j][0]) / math.sqrt(self.params[j][1] ** 2 + 1e-3) for j in range(n_cols)]
+            normalized_row = [(x[i][j] - self.params[j][0]) / math.sqrt(self.params[j][1] ** 2 + 1e-3) for j in
+                              range(n_cols)]
             normalized_x.append(normalized_row)
         return normalized_x
 
@@ -88,14 +96,7 @@ def train_normalization_model(train_features, val_features):
     return Normalizer(params)
 
 
-def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folder_path):
-    embeddings = get_gpt_embeddings(folder_path=embeddings_folder_path, selected_dict=files_dict)
-
-    query_dataset = QueryDataset(embeddings, files_dict)
-    document_dataset = DocumentDataset(embeddings, files_dict)
-    q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-    d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
-
+def get_tabular_features(qd_dataloader, files_dict, embeddings, preprocessing_folder_path):
     recall_model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
     recall_model.load_weights(get_best_weights('recall'))
 
@@ -119,8 +120,7 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
 
     bag_model = BM25Custom(corpus=d_tokenized_corpus, k1=3.0, b=1.0)
 
-    top_n_scores = [x for x in iterate_dataset_with_model(recall_model,
-                                                          (q_dataloader, d_dataloader),
+    top_n_scores = [x for x in iterate_dataset_with_model(recall_model, qd_dataloader,
                                                           pe_cutoff=PE_CUTOFF,
                                                           score_function=SIMILARITY_FUNCTION_DIM_1,
                                                           score_iterator_mode=True)]
@@ -160,8 +160,8 @@ def get_tabular_features(files_dict, preprocessing_folder_path, embeddings_folde
 
 
 def apply_cutoff(arr):
-    threshold = arr[0] * CATBOOST_SIM_RATIO
-    mask = arr < threshold
+    mask = arr < arr[0] * CATBOOST_SIM_RATIO
+    # mask = arr < CATBOOST_THRESHOLD
     arr[mask] = 0
     arr[~mask] = 1
     return arr
@@ -223,6 +223,8 @@ if __name__ == '__main__':
     model.fit(train_pool, eval_set=val_pool, verbose=False)
     model.save_model('catboost_model.bin')
 
+    # Y = model._predict(test_pool, 'Probability', 0, 0, -1, None,
+    #                    parent_method_name='predict')[:, 0]
     Y = model.predict(test_pool)
 
     n_queries = len(set(test_group_id))

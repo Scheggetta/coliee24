@@ -52,13 +52,6 @@ class BM25Custom(BM25Okapi):
         scores = np.argsort(scores)[::-1]
         top_n = scores[:n]
 
-        # TODO: check that the first element is not the query itself
-
-        # TODO
-        # threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
-        # predicted_pe = [x for x in similarities if x[1] >= threshold]
-        # predicted_pe = predicted_pe[:MAX_DOCS] if len(predicted_pe) > MAX_DOCS else predicted_pe
-
         return top_n
 
     def get_top_n_indexes_scores(self, query, n):
@@ -66,33 +59,28 @@ class BM25Custom(BM25Okapi):
         top_n = [(idx, score) for idx, score in enumerate(scores)]
         top_n = sorted(top_n, key=lambda x: x[1], reverse=True)[:n]
 
-        # threshold = similarities[0][1] * RATIO_MAX_SIMILARITY
-        # predicted_pe = [x for x in similarities if x[1] >= threshold]
-        # predicted_pe = predicted_pe[:MAX_DOCS] if len(predicted_pe) > MAX_DOCS else predicted_pe
-
         return top_n
 
 
 if __name__ == '__main__':
-    set_random_seeds(1984)
+    if PREPROCESSING_DATASET_TYPE == 'train':
+        _, files_dict = split_dataset(load=True)
+    else:
+        files_dict = json.load(open(Path.joinpath(Path('Dataset'), Path(f'task1_test_labels_2024.json'))))
     folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
-    json_path = Path.joinpath(Path('Dataset'), Path(f'task1_{PREPROCESSING_DATASET_TYPE}_labels_2024.json'))
-    json_dict = json.load(open(json_path))
-    train_dict, val_dict = split_dataset(json_dict, split_ratio=0.9)
 
-    val_files = []
-    for key, values in val_dict.items():
-        val_files.append(key)
-        val_files.extend(values)
-    val_files = SetList(val_files)
+    files = []
+    for key, values in files_dict.items():
+        files.append(key)
+        files.extend(values)
+    files = SetList(files)
 
-    files = val_files
-    files_dict = val_dict
-
-    d_preprocessed_corpus = [(filename, open(os.path.join(folder, filename)).read()) for filename in files]
+    d_preprocessed_corpus = [(filename, open(os.path.join(folder, filename), encoding='utf-8').read())
+                             for filename in files]
     d_tokenized_corpus = tokenize(d_preprocessed_corpus)
 
-    q_preprocessed_corpus = [(filename, open(os.path.join(folder, filename)).read()) for filename in list(files_dict.keys())]
+    q_preprocessed_corpus = [(filename, open(os.path.join(folder, filename), encoding='utf-8').read())
+                             for filename in list(files_dict.keys())]
     q_tokenized_corpus = tokenize(q_preprocessed_corpus)
 
     model = BM25Custom(corpus=d_tokenized_corpus, k1=3.0, b=1.0)
@@ -108,7 +96,7 @@ if __name__ == '__main__':
 
     for q_name, _ in q_preprocessed_corpus:
         q_text = q_tokenized_corpus[i]
-        pe = val_dict[q_name]
+        pe = files_dict[q_name]
         pe_idxs = [files.index(x) for x in pe]
 
         relevant_cases += len(pe)

@@ -8,14 +8,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils import set_random_seeds, average_negative_evidences, get_best_weights
+from utils import set_random_seeds, get_best_weights
 from parameters import *
-from dataset import TrainingDataset, QueryDataset, DocumentDataset, custom_collate_fn, get_gpt_embeddings, split_dataset
-
-
-# TODO:
-#  - hyperparameter grid search (parallel inference to save time?)
-#  - learning to rank
+from dataset import create_dataloaders
 
 
 class EmbeddingHead(torch.nn.Module):
@@ -139,10 +134,8 @@ def train(model,
             if HARD_NEGATIVE_MINING:
                 with torch.no_grad():
                     query_out, pe_out, ne_out = model(query, pe, ne)
-                    # ne_out = ne_out.detach().to('cpu').tolist()
                     ne_filtered = []
                     for idx, ne_el in enumerate(ne_out):
-                        # ne_el = torch.Tensor(ne_el).to('cuda')
                         ne_filtered.append(ne[idx][val_loss_function(query_out[idx].unsqueeze(0), ne_el,
                                                                      -torch.ones(len(ne_el)).to('cuda')) > 0])
 
@@ -232,7 +225,6 @@ def cosine_loss_function(query, pe, ne, cosine_loss_margin, pe_weight):
     return loss / len(query)
 
 
-# TODO: i think 'default parameters' should have a real meaning
 def iterate_dataset_with_model(model,
                                validation_dataloader,
                                pe_weight=None,
@@ -243,7 +235,8 @@ def iterate_dataset_with_model(model,
                                val_loss_function=None,
                                score_function=None,
                                iterator_mode=False,
-                               score_iterator_mode=False
+                               score_iterator_mode=False,
+                               verbose=False
                                ):
     if model is None:
         warnings.warn('WARNING: `model` of `iterate_dataset_with_model` function is set to None. No embedding '
@@ -252,9 +245,11 @@ def iterate_dataset_with_model(model,
         def model(query, doc):
             return query, doc
     else:
-        assert isinstance(model, EmbeddingHead), 'No models with the exception of EmbeddingHead are supported.'
-        model = model.to('cuda')
-        model.eval()
+        if isinstance(model, EmbeddingHead):
+            model = model.to('cuda')
+            model.eval()
+        elif not isinstance(model, type(lambda x: x)):
+            raise ValueError('`model` must be an instance of EmbeddingHead or a function')
 
     if val_loss_function is None:
         warnings.warn(
@@ -294,7 +289,7 @@ def iterate_dataset_with_model(model,
     retrieved_cases = 0
     relevant_cases = 0
 
-    if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
+    if verbose:
         pbar = tqdm(total=len(q_dataloader), desc='Testing')
 
     with torch.no_grad():
@@ -315,7 +310,6 @@ def iterate_dataset_with_model(model,
                 if iterator_mode:
                     yield query_out, doc_out
 
-                # TODO: check if dot product is better than cosine similarity
                 if score_function is not None:
                     s = score_function(query_out, doc_out)
                     for idx, el in enumerate(s):
@@ -349,7 +343,6 @@ def iterate_dataset_with_model(model,
                 predicted_pe_idxs = d_dataloader.dataset.get_indexes(predicted_pe_names)
 
                 if score_iterator_mode:
-                    # predicted_pe_scores = [x[1] for x in predicted_pe]
                     yield predicted_pe
 
                 gt = torch.zeros(len(similarities))
@@ -360,7 +353,7 @@ def iterate_dataset_with_model(model,
                 correctly_retrieved_cases += len(gt[(gt == 1) & (predictions == 1)])
                 retrieved_cases += len(predictions[predictions == 1])
 
-            if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
+            if verbose:
                 pbar.update()
             d_dataloader.dataset.restore()
 
@@ -387,7 +380,7 @@ def iterate_dataset_with_model(model,
         pe_val_loss = -1
         ne_val_loss = -1
 
-    if PREPROCESSING_DATASET_TYPE == 'test' or score_iterator_mode:
+    if verbose:
         pbar.close()
     if not iterator_mode and not score_iterator_mode:
         yield val_loss, weighted_val_loss, pe_val_loss, ne_val_loss, precision, recall, f1_score
@@ -395,27 +388,8 @@ def iterate_dataset_with_model(model,
 
 
 if __name__ == '__main__':
-    # json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
-    # split_dataset(json_dict, seed=57)
-    # quit()
-
-    # TODO: refactor datasets' generation (put the code in a function)
     if PREPROCESSING_DATASET_TYPE == 'train':
-        train_dict, val_dict = split_dataset(load=True)
-
-        training_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
-                                                 selected_dict=train_dict)
-        validation_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
-                                                   selected_dict=val_dict)
-
-        dataset = TrainingDataset(training_embeddings, train_dict)
-        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
-
-        query_dataset = QueryDataset(validation_embeddings, val_dict)
-        document_dataset = DocumentDataset(validation_embeddings, val_dict)
-        q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-        d_dataloader = DataLoader(document_dataset, batch_size=128, shuffle=False)
-
+        training_dataloader, validation_dataloader = create_dataloaders('train')
         set_random_seeds(2)
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
@@ -423,38 +397,30 @@ if __name__ == '__main__':
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
                                                                   patience=PATIENCE, cooldown=COOLDOWN)
 
-        train(model, training_dataloader, (q_dataloader, d_dataloader), 10,
+        train(model, training_dataloader, validation_dataloader,
+              num_epochs=20,
               metric='val_f1_score',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)
     else:
-        json_dict = json.load(open('Dataset/task1_%s_labels_2024.json' % PREPROCESSING_DATASET_TYPE))
-        test_embeddings = get_gpt_embeddings(folder_path='Dataset/gpt_embed_%s' % PREPROCESSING_DATASET_TYPE,
-                                             selected_dict=json_dict)
-
-        query_dataset = QueryDataset(test_embeddings, json_dict)
-        document_dataset = DocumentDataset(test_embeddings, json_dict)
-        q_dataloader = DataLoader(query_dataset, batch_size=1, shuffle=False)
-        d_dataloader = DataLoader(document_dataset, batch_size=64, shuffle=False)
+        # TODO: Re-train with whole training set
+        _, test_dataloader = create_dataloaders('test')
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
         model.load_weights(get_best_weights('val_f1_score'))
 
         val_loss_function = torch.nn.CosineEmbeddingLoss(margin=COSINE_LOSS_MARGIN, reduction='none')
-        # dot product or cosine similarity?
-        from utils import dot_similarity
-
         score_function = torch.nn.CosineSimilarity(dim=1)
-        # score_function = dot_similarity
 
-        results = iterate_dataset_with_model(model, (q_dataloader, d_dataloader),
+        results = iterate_dataset_with_model(model, test_dataloader,
                                              pe_weight=PE_WEIGHT,
                                              dynamic_cutoff=DYNAMIC_CUTOFF,
                                              ratio_max_similarity=RATIO_MAX_SIMILARITY,
                                              pe_cutoff=PE_CUTOFF,
                                              max_docs=MAX_DOCS,
                                              val_loss_function=val_loss_function,
-                                             score_function=score_function)
+                                             score_function=score_function,
+                                             verbose=True)
         res = next(results)
         print(f'Test set results:\n val_loss: {res[0]}, weighted_val_loss: {res[1]}, pe_val_loss: {res[2]}, '
               f'ne_val_loss: {res[3]}, precision: {res[4]}, recall: {res[5]}, f1_score: {res[6]}')
