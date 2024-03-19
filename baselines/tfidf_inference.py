@@ -17,7 +17,11 @@ def import_corpus(train=True):
 
 
 def train_model(corpus):
-    vectorizer = TfidfVectorizer()
+    vectorizer = TfidfVectorizer(stop_words='English',
+                                 lowercase=True,
+                                 max_features=1500,
+                                 ngram_range=(1, 2),
+                                 tokenizer=nltk.word_tokenize)
     X = vectorizer.fit_transform(corpus)
     return vectorizer, X.toarray()
 
@@ -112,9 +116,9 @@ def compute_f1_score(results, json_dict):
 
 
 if __name__ == '__main__':
-    train_results, _, test_results = tf_idf(threshold=0.5, save_results=True,
-                                            split_ratio=None, load_model=False,
-                                            save_path=Path.joinpath(Path('Dataset'), Path('tfidf_baseline')))
-    f1 = compute_f1_score(test_results, json.load(open('Dataset/task1_test_labels_2024.json')))
-    print(f"F1 score: {f1}!!!")
+    train_results, _, test_results = tf_idf(threshold=0.5, save_results=False,
+                                            split_ratio=0.8, load_model=True,
+                                            )#save_path=Path.joinpath(Path('Dataset'), Path('tfidf_baseline')))
+    # f1 = compute_f1_score(test_results, json.load(open('Dataset/task1_test_labels_2024.json')))
+    # print(f"F1 score: {f1}!!!")
 
