@@ -8,130 +8,127 @@ import numpy as np
 import pickle
 from sklearn.metrics import f1_score
 from pathlib import Path
+from bm25_inference import tokenize_parallel, tokenize_corpus_from_dict
+from parameters import *
+import torch
+from tqdm import tqdm
 
 
-def import_corpus(train=True):
-    train_flag = 'train' if train else 'test'
-    return [open(f'Dataset/translated_{train_flag}/{x}', 'r', encoding='utf-8').read()
-            for x in os.listdir(f'Dataset/translated_{train_flag}')]
+class TfidfCustom:
+    def __init__(self, train_corpus, test_corpus):
+        self.model = TfidfVectorizer(analyzer=lambda x: x)
+        self.X_train = self.model.fit_transform(train_corpus).toarray()
+        self.X_test = self.model.transform(test_corpus).toarray()
+
+    def get_scores(self, query):
+        return self.model.transform([query]).toarray().dot(self.X_train.T).flatten()
+
+    def get_test_scores(self, query):
+        return self.model.transform([query]).toarray().dot(self.X_test.T).flatten()
+
+    def get_top_n_indexes(self, query, n, return_scores=False):
+        scores = self.get_scores(query)
+        indexes = np.argsort(scores)[::-1]
+        top_n = indexes[:n]
+
+        if return_scores:
+            return top_n, scores[top_n]
+
+        return top_n
+
+    def get_test_top_n_indexes(self, query, n, return_scores=False):
+        scores = self.get_test_scores(query)
+        scores = np.argsort(scores)[::-1]
+        top_n = scores[:n]
+
+        if return_scores:
+            return top_n, scores[top_n]
+
+        return top_n
 
 
-def train_model(corpus):
-    vectorizer = TfidfVectorizer(stop_words='English',
-                                 lowercase=True,
-                                 max_features=1500,
-                                 ngram_range=(1, 2),
-                                 tokenizer=nltk.word_tokenize)
-    X = vectorizer.fit_transform(corpus)
-    return vectorizer, X.toarray()
+def iterate_dataset_with_tfidf(model,
+                               files,
+                               files_dict,
+                               q_pr_corpus,
+                               q_tk_corpus,
+                               mode: str,
+                               return_results=False,
+                               get_top_n=True
+                               ):
+    assert mode in ['train', 'test'], 'Invalid mode'
 
-
-def predict(queries, documents_names, similarity_function, tf_idf_table, thr=None):
-    queries = list(filter(lambda x: x in documents_names, queries))
-    queries_idxs = list(map(lambda x: documents_names.index(x), queries))
     results = dict()
-    cnt = 1
-    for i, q in zip(queries_idxs, queries):
-        print(f'query idx: {cnt} out of {len(queries)}')
-        cnt += 1
-        for i_doc, d_name in enumerate(documents_names):
-            if i != i_doc:
-                similarity_metric = similarity_function(tf_idf_table[i, :], tf_idf_table[i_doc, :])
-                if thr:
-                    results[(q, d_name)] = 1 if similarity_metric > thr else 0
-                else:
-                    results[(q, d_name)] = similarity_metric
-    return results
+    pbar = tqdm(total=len(q_pr_corpus), desc='TFIDF %s' % mode)
 
+    f1 = 0.0
+    i = 0
 
-def get_prediction_data(json_path, documents_folder):
-    map_dict = json.load(open(json_path))
-    queries = list(map_dict.keys())
-    documents_names = os.listdir(documents_folder)
-    return map_dict, queries, documents_names
+    correctly_retrieved_cases = 0
+    retrieved_cases = 0
+    relevant_cases = 0
 
+    for q_name, _ in q_pr_corpus:
+        q_text = q_tk_corpus[i]
 
-def tf_idf(save_model=True, save_results=True, split_ratio=0.8, threshold=None, load_model=True,
-           save_path=Path('Dataset')):
-    # Threshold is in charge of crisp predictions instead of metrics results
-    corpus = import_corpus()
+        if return_results:
+            if mode == 'train':
+                scores = model.get_scores(q_text)
+            elif mode == 'test':
+                scores = model.get_test_scores(q_text)
+            for d_name, score in zip(files, scores):
+                if d_name != q_name:
+                    results[(q_name, d_name)] = score
 
-    train_corpus = corpus
-    # split_ratio = 0.8
-    if split_ratio:
-        train_corpus, validation_corpus = corpus[:int(len(corpus) * split_ratio)], corpus[
-                                                                                   int(len(corpus) * split_ratio):]
+        if get_top_n:
+            pe = files_dict[q_name]
+            pe_idxs = [files.index(x) for x in pe]
 
-    if (load_model and os.path.exists(Path.joinpath(save_path, Path('tf_idf_model.pkl')))
-            and os.path.exists(Path.joinpath(save_path, Path('tf_idf_X.pkl')))):
-        model = pickle.load(open(Path.joinpath(save_path, Path('tf_idf_model.pkl')), 'rb'))
-        X = pickle.load(open(Path.joinpath(save_path, Path('tf_idf_X.pkl')), 'rb'))
-    else:
-        model, X = train_model(train_corpus)
+            relevant_cases += len(pe)
 
-    if save_model:
-        pickle.dump(model, open(Path.joinpath(save_path, Path('tf_idf_model.pkl')), 'wb'))
-        pickle.dump(X, open(Path.joinpath(save_path, Path('tf_idf_X.pkl')), 'wb'))
+            if mode == 'train':
+                indexes = model.get_top_n_indexes(q_text, n=TFIDF_TOP_N+1)
+            elif mode == 'test':
+                indexes = model.get_test_top_n_indexes(q_text, n=TFIDF_TOP_N+1)
+            predicted_pe_idxs = [idx for idx in indexes if idx != files.index(q_name)]
 
-    similarity_function = lambda x, y: x.dot(y) / (np.linalg.norm(x) * np.linalg.norm(y))
-    # threshold = 0.5
+            gt = torch.zeros(len(files))
+            gt[pe_idxs] = 1
+            targets = torch.zeros(len(files))
+            targets[predicted_pe_idxs] = 1
 
-    train_dict, train_queries, documents_names = \
-        get_prediction_data('Dataset/task1_train_labels_2024.json',
-                            'Dataset/translated_train')
+            correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
+            retrieved_cases += len(targets[targets == 1])
+            precision = correctly_retrieved_cases / retrieved_cases
+            recall = correctly_retrieved_cases / relevant_cases
+            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
-    extent = int(len(documents_names) * split_ratio) if split_ratio else len(documents_names)
-    documents_names = documents_names[:extent]
-    train_results = predict(train_queries, documents_names, similarity_function, X, threshold)
+            pbar.set_description(f'pre: {precision:.4f} - '
+                                 f'rec: {recall:.4f} - '
+                                 f'f1: {f1_score:.4f}')
 
-    if split_ratio:
-        val_dict, val_queries, documents_names = \
-            get_prediction_data('Dataset/task1_train_labels_2024.json',
-                                'Dataset/translated_train')
-        X_val = model.transform(validation_corpus).toarray()
-        extent = int(len(documents_names) * split_ratio) if split_ratio else len(documents_names)
-        documents_names = documents_names[extent:]
-        val_results = predict(val_queries, documents_names, similarity_function, X_val, threshold)
-    else:
-        val_results = None
+        i += 1
+        pbar.update()
+    pbar.close()
 
-    test_dict, test_queries, test_documents_names = \
-        get_prediction_data('Dataset/task1_test_labels_2024.json',
-                            'Dataset/translated_test')
-
-    test_corpus = import_corpus(train=False)
-    X_test = model.transform(test_corpus).toarray()
-    test_results = predict(test_queries, test_documents_names, similarity_function, X_test, threshold)
-
-    if save_results:
-        pickle.dump([train_results, val_results, test_results], open(save_path, 'wb'))
-
-    return train_results, val_results, test_results
-
-
-def compute_f1_score(results, json_dict):
-    predicted = [results[i, j] for i, j in results.keys()]
-    ground_truth = [1 if j in json_dict[i] else 0 for i, j in results.keys()]
-    return f1_score(ground_truth, predicted)
+    if return_results:
+        return results
 
 
 if __name__ == '__main__':
-    from sklearn.feature_extraction.text import TfidfTransformer
+    train_folder = Path.joinpath(Path('Dataset'), Path('translated_train'))
+    train_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_train_labels_2024.json'))))
+    test_folder = Path.joinpath(Path('Dataset'), Path('translated_test'))
+    test_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
 
-    counts = [[3, 0, 1],
-              [2, 0, 0],
-              [3, 0, 0],
-              [4, 0, 0],
-              [3, 2, 0],
-              [3, 0, 2]]
-    transformer = TfidfTransformer(smooth_idf=True)
-    tfidf = transformer.fit_transform(counts).toarray()
-    w = transformer.idf_
-    quit()
+    train_files, train_d_pr_corpus, train_d_tk_corpus, train_q_pr_corpus, train_q_tk_corpus = \
+        tokenize_corpus_from_dict(train_dict, train_folder)
+    test_files, test_d_pr_corpus, test_d_tk_corpus, test_q_pr_corpus, test_q_tk_corpus = \
+        tokenize_corpus_from_dict(test_dict, test_folder)
 
-    train_results, _, test_results = tf_idf(threshold=0.5, save_results=True,
-                                            split_ratio=None, load_model=False,
-                                            save_path=Path.joinpath(Path('Dataset'), Path('tfidf_baseline')))
-    f1 = compute_f1_score(test_results, json.load(open('Dataset/task1_test_labels_2024.json')))
-    print(f"F1 score: {f1}!!!")
+    model = TfidfCustom(train_d_tk_corpus, test_d_tk_corpus)
 
+    train_results = iterate_dataset_with_tfidf(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus, 'train', return_results=True, get_top_n=False)
+    test_results = iterate_dataset_with_tfidf(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus, 'test', return_results=True, get_top_n=False)
+    pickle.dump(train_results, open('Dataset/tfidf_train_results.pkl', 'wb'))
+    pickle.dump(test_results, open('Dataset/tfidf_test_results.pkl', 'wb'))

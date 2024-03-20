@@ -32,6 +32,9 @@ RATIO_MAX_SIMILARITY = 0.95   # 0.95
 # BM25
 BM25_TOP_N = 5   # 5
 
+# TFIDF
+TFIDF_TOP_N = 10  # 5
+
 # Regularization
 DROPOUT_RATE = 0.0  # 0.2
 
