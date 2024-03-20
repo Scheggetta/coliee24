@@ -81,7 +81,8 @@ def average_negative_evidences(tensor_list):
     return total_length / num_tensors
 
 
-def get_best_weights(metric='val_f1_score'):
+def get_best_weights(metric='val_f1_score', mode=max):
     weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt') and metric in x]
-    best_path = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))[-1]
+    paths = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))
+    best_path = paths[-1] if mode == 'max' else paths[0]
     return Path.joinpath(Path('Checkpoints'), Path(best_path))

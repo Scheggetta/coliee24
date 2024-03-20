@@ -161,7 +161,7 @@ def get_gpt_embeddings(folder_path: Path, selected_dict: dict):
     return embeddings
 
 
-def split_dataset(json_dict=None, split_ratio=0.8, seed=42, save=True, load=False):
+def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, load=False):
     if not load and json_dict is None:
         raise ValueError('json_dict is None and load is False')
 
@@ -190,15 +190,16 @@ def split_dataset(json_dict=None, split_ratio=0.8, seed=42, save=True, load=Fals
     return train_dict, val_dict
 
 
-def create_dataloaders(dataset_type):
+def create_dataloaders(dataset_type, load=True):
     training_dataloader = None
     if dataset_type == 'train':
-        train_dict, qd_dict = split_dataset(load=True)
+        train_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_train_labels_2024.json'))))
+        train_dict, qd_dict = split_dataset(load=load, save=False, json_dict=train_dict)
         training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                                  selected_dict=train_dict)
 
         dataset = TrainingDataset(training_embeddings, train_dict)
-        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=True)
+        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
     else:
         qd_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
 

@@ -70,7 +70,6 @@ def train(model,
           loss_function=None,
           cosine_loss_margin=COSINE_LOSS_MARGIN,
           lr_scheduler=None,
-          lr_scheduler_mode='max',
           val_loss_function=None,
           score_function=None,
           dynamic_cutoff=DYNAMIC_CUTOFF,
@@ -91,14 +90,14 @@ def train(model,
         warnings.warn(
             'WARNING: `lr_scheduler` of `train` function is set to None. Using ReduceLROnPlateau with default params.')
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
-                                                                  patience=PATIENCE, cooldown=COOLDOWN,
-                                                                  mode=lr_scheduler_mode)
-    if metric in ['precision', 'recall', 'val_f1_score'] and lr_scheduler_mode != 'max':
-        raise ValueError('`lr_scheduler_mode` must be set to "max" when using precision, recall or f1_score as metric')
-    if metric in ['train_loss', 'val_loss'] and lr_scheduler_mode != 'min':
-        raise ValueError('`lr_scheduler_mode` must be set to "min" when using train_loss or val_loss as metric')
-    if lr_scheduler_mode not in ['max', 'min']:
-        raise ValueError('`lr_scheduler_mode` must be set to "max" or "min"')
+                                                                  patience=PATIENCE, cooldown=COOLDOWN)
+        if metric in ['precision', 'recall', 'val_f1_score']:
+            lr_scheduler.mode = 'max'
+        elif metric in ['train_loss', 'val_loss']:
+            lr_scheduler.mode = 'min'
+        else:
+            raise ValueError('`metric` must be one of `precision`, `recall`, `val_f1_score`, `train_loss` or '
+                             '`val_loss`.')
 
     if loss_function is None:
         loss_function = cosine_loss_function
@@ -113,8 +112,6 @@ def train(model,
 
     if verbose:
         pbar = tqdm(total=num_epochs, desc='Training')
-    if HARD_NEGATIVE_MINING:
-        starting_size = SAMPLE_SIZE
 
     best_weights = model.state_dict()
     for epoch in range(num_epochs):
@@ -185,13 +182,13 @@ def train(model,
 
         if save_weights:
             if epoch == 0 or \
-                    lr_scheduler_mode == 'max' and current_metric > max(history[metric][:-1]) or \
-                    lr_scheduler_mode == 'min' and current_metric < min(history[metric][:-1]):
+                    lr_scheduler.mode == 'max' and current_metric > max(history[metric][:-1]) or \
+                    lr_scheduler.mode == 'min' and current_metric < min(history[metric][:-1]):
                 best_weights = model.state_dict()
 
     if save_weights:
         model.load_state_dict(best_weights)
-        if lr_scheduler_mode == 'max':
+        if lr_scheduler.mode == 'max':
             model.save_weights(params={metric: max(history[metric])})
         else:
             model.save_weights(params={metric: min(history[metric])})
@@ -358,8 +355,8 @@ def iterate_dataset_with_model(model,
             d_dataloader.dataset.restore()
 
     if score_function is not None:
-        precision = correctly_retrieved_cases / retrieved_cases
-        recall = correctly_retrieved_cases / relevant_cases
+        precision = correctly_retrieved_cases / retrieved_cases if retrieved_cases > 0 else 0
+        recall = correctly_retrieved_cases / relevant_cases if relevant_cases > 0 else 0
         f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
     else:
         precision = -1
@@ -389,25 +386,24 @@ def iterate_dataset_with_model(model,
 
 if __name__ == '__main__':
     if PREPROCESSING_DATASET_TYPE == 'train':
-        training_dataloader, validation_dataloader = create_dataloaders('train')
-        set_random_seeds(2)
+        training_dataloader, validation_dataloader = create_dataloaders('train', load=False)
+        set_random_seeds(1984)
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=FACTOR, threshold=THRESHOLD,
-                                                                  patience=PATIENCE, cooldown=COOLDOWN)
+                                                                  patience=PATIENCE, cooldown=COOLDOWN, mode='min')
 
         train(model, training_dataloader, validation_dataloader,
-              num_epochs=20,
-              metric='val_f1_score',
+              num_epochs=50,
+              metric='train_loss',
               optimizer=optimizer,
               lr_scheduler=lr_scheduler)
     else:
-        # TODO: Re-train with whole training set
         _, test_dataloader = create_dataloaders('test')
 
         model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
-        model.load_weights(get_best_weights('val_f1_score'))
+        model.load_weights(get_best_weights('train_loss', mode='min'))
 
         val_loss_function = torch.nn.CosineEmbeddingLoss(margin=COSINE_LOSS_MARGIN, reduction='none')
         score_function = torch.nn.CosineSimilarity(dim=1)
