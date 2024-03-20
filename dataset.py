@@ -198,7 +198,7 @@ def create_dataloaders(dataset_type):
                                                  selected_dict=train_dict)
 
         dataset = TrainingDataset(training_embeddings, train_dict)
-        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
+        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=True)
     else:
         qd_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
 
@@ -213,4 +213,3 @@ def create_dataloaders(dataset_type):
     qd_dataloader = (q_dataloader, d_dataloader)
 
     return training_dataloader, qd_dataloader
-
