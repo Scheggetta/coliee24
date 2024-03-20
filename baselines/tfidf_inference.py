@@ -1,17 +1,14 @@
-from sklearn.feature_extraction.text import TfidfVectorizer
-import nltk
-import re
-import os
 import json
-from functools import reduce
-import numpy as np
 import pickle
-from sklearn.metrics import f1_score
 from pathlib import Path
-from bm25_inference import tokenize_parallel, tokenize_corpus_from_dict
-from parameters import *
+
+import numpy as np
 import torch
 from tqdm import tqdm
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+from bm25_inference import tokenize_corpus_from_dict
+from parameters import *
 
 
 class TfidfCustom:
@@ -128,7 +125,9 @@ if __name__ == '__main__':
 
     model = TfidfCustom(train_d_tk_corpus, test_d_tk_corpus)
 
-    train_results = iterate_dataset_with_tfidf(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus, 'train', return_results=True, get_top_n=False)
-    test_results = iterate_dataset_with_tfidf(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus, 'test', return_results=True, get_top_n=False)
+    train_results = iterate_dataset_with_tfidf(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus,
+                                               'train', return_results=True, get_top_n=False)
+    test_results = iterate_dataset_with_tfidf(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus,
+                                              'test', return_results=True, get_top_n=False)
     pickle.dump(train_results, open('Dataset/tfidf_train_results.pkl', 'wb'))
     pickle.dump(test_results, open('Dataset/tfidf_test_results.pkl', 'wb'))

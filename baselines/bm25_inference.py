@@ -2,6 +2,7 @@ import os
 import json
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
+import pickle
 
 import nltk
 from nltk.tokenize import RegexpTokenizer
@@ -159,7 +160,10 @@ def iterate_dataset_with_bm25(model,
         q_text = q_tk_corpus[i]
 
         if return_results:
-            scores = model.get_scores(q_text)
+            if mode == 'train':
+                scores = model.get_scores(q_text)
+            elif mode == 'test':
+                scores = model.get_test_scores(q_text)
             for d_name, score in zip(files, scores):
                 if d_name != q_name:
                     results[(q_name, d_name)] = score
@@ -212,5 +216,9 @@ if __name__ == '__main__':
 
     model = BM25Custom(corpus=train_d_tk_corpus, k1=3.0, b=1.0, test_corpus=test_d_tk_corpus)
 
-    iterate_dataset_with_bm25(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus, 'train')
-    iterate_dataset_with_bm25(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus, 'test')
+    train_results = iterate_dataset_with_bm25(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus,
+                                              'train', return_results=True, get_top_n=False)
+    test_results = iterate_dataset_with_bm25(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus,
+                                             'test', return_results=True, get_top_n=False)
+    pickle.dump(train_results, open('Dataset/bm25_train_results.pkl', 'wb'))
+    pickle.dump(test_results, open('Dataset/bm25_test_results.pkl', 'wb'))
