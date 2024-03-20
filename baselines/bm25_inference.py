@@ -1,22 +1,18 @@
 import os
 import json
-import random
 from multiprocessing import Pool, cpu_count
+from pathlib import Path
 
 import nltk
 from nltk.tokenize import RegexpTokenizer
 import re
-from rank_bm25 import BM25Okapi
-import numpy as np
 from tqdm import tqdm
+import numpy as np
 import torch
-from torcheval.metrics.functional import binary_f1_score
+from rank_bm25 import BM25Okapi
 
 from parameters import *
-from dataset import split_dataset
 from setlist import SetList
-from pathlib import Path
-from utils import set_random_seeds
 
 
 def lowercase(text):
@@ -99,40 +95,28 @@ class BM25Custom(BM25Okapi):
                                                (q_freq + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)))
         return score
 
-    def get_test_top_n_indexes(self, query, n):
+    def get_test_top_n_indexes(self, query, n, return_scores=False):
         scores = self.get_test_scores(query)
         scores = np.argsort(scores)[::-1]
         top_n = scores[:n]
 
+        if return_scores:
+            return top_n, scores[top_n]
+
         return top_n
 
-    def get_top_n_indexes(self, query, n):
+    def get_top_n_indexes(self, query, n, return_scores=False):
         scores = self.get_scores(query)
-        scores = np.argsort(scores)[::-1]
-        top_n = scores[:n]
+        indexes = np.argsort(scores)[::-1]
+        top_n = indexes[:n]
 
-        return top_n
-
-    def get_top_n_indexes_scores(self, query, n):
-        scores = self.get_scores(query)
-        top_n = [(idx, score) for idx, score in enumerate(scores)]
-        top_n = sorted(top_n, key=lambda x: x[1], reverse=True)[:n]
+        if return_scores:
+            return top_n, scores[top_n]
 
         return top_n
 
 
-if __name__ == '__main__':
-    if PREPROCESSING_DATASET_TYPE == 'train':
-        _, files_dict = split_dataset(load=True)
-    else:
-        files_dict = json.load(open(Path.joinpath(Path('Dataset'), Path(f'task1_test_labels_2024.json'))))
-    folder = Path.joinpath(Path('Dataset'), Path(f'translated_{PREPROCESSING_DATASET_TYPE}'))
-
-    # files_dict = {key: value for n, (key, value) in enumerate(files_dict.items()) if n < 10}
-
-    def tokenize_corpus():
-        pass
-
+def tokenize_corpus_from_dict(files_dict, folder):
     files = []
     for key, values in files_dict.items():
         files.append(key)
@@ -147,9 +131,22 @@ if __name__ == '__main__':
                              for filename in list(files_dict.keys())]
     q_tokenized_corpus = tokenize_parallel(q_preprocessed_corpus)
 
-    model = BM25Custom(corpus=d_tokenized_corpus, k1=3.0, b=1.0, test_corpus=None)
+    return files, d_preprocessed_corpus, d_tokenized_corpus, q_preprocessed_corpus, q_tokenized_corpus
 
-    pbar = tqdm(total=len(q_preprocessed_corpus), desc='BM25 Inference')
+
+def iterate_dataset_with_bm25(model,
+                              files,
+                              files_dict,
+                              q_pr_corpus,
+                              q_tk_corpus,
+                              mode: str,
+                              return_results=False,
+                              get_top_n=True
+                              ):
+    assert mode in ['train', 'test'], 'Invalid mode'
+
+    results = dict()
+    pbar = tqdm(total=len(q_pr_corpus), desc='BM25 %s' % mode)
 
     f1 = 0.0
     i = 0
@@ -158,32 +155,62 @@ if __name__ == '__main__':
     retrieved_cases = 0
     relevant_cases = 0
 
-    for q_name, _ in q_preprocessed_corpus:
-        q_text = q_tokenized_corpus[i]
-        pe = files_dict[q_name]
-        pe_idxs = [files.index(x) for x in pe]
+    for q_name, _ in q_pr_corpus:
+        q_text = q_tk_corpus[i]
 
-        relevant_cases += len(pe)
+        if return_results:
+            scores = model.get_scores(q_text)
+            for d_name, score in zip(files, scores):
+                if d_name != q_name:
+                    results[(q_name, d_name)] = score
 
-        indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N+1)
-        # indexes = model.get_test_top_n_indexes(q_text, n=BM25_TOP_N+1)
-        predicted_pe_names = [d_preprocessed_corpus[idx][0] for idx in indexes if idx != files.index(q_name)]
-        predicted_pe_idxs = [files.index(x) for x in predicted_pe_names]
+        if get_top_n:
+            pe = files_dict[q_name]
+            pe_idxs = [files.index(x) for x in pe]
 
-        gt = torch.zeros(len(files))
-        gt[pe_idxs] = 1
-        targets = torch.zeros(len(files))
-        targets[predicted_pe_idxs] = 1
+            relevant_cases += len(pe)
 
-        correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
-        retrieved_cases += len(targets[targets == 1])
-        precision = correctly_retrieved_cases / retrieved_cases
-        recall = correctly_retrieved_cases / relevant_cases
-        f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+            if mode == 'train':
+                indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N+1)
+            elif mode == 'test':
+                indexes = model.get_test_top_n_indexes(q_text, n=BM25_TOP_N+1)
+            predicted_pe_idxs = [idx for idx in indexes if idx != files.index(q_name)]
+
+            gt = torch.zeros(len(files))
+            gt[pe_idxs] = 1
+            targets = torch.zeros(len(files))
+            targets[predicted_pe_idxs] = 1
+
+            correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
+            retrieved_cases += len(targets[targets == 1])
+            precision = correctly_retrieved_cases / retrieved_cases
+            recall = correctly_retrieved_cases / relevant_cases
+            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+
+            pbar.set_description(f'pre: {precision:.4f} - '
+                                 f'rec: {recall:.4f} - '
+                                 f'f1: {f1_score:.4f}')
 
         i += 1
-        pbar.set_description(f'pre: {precision:.4f} - '
-                             f'rec: {recall:.4f} - '
-                             f'f1: {f1_score:.4f}')
         pbar.update()
     pbar.close()
+
+    if return_results:
+        return results
+
+
+if __name__ == '__main__':
+    train_folder = Path.joinpath(Path('Dataset'), Path('translated_train'))
+    train_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_train_labels_2024.json'))))
+    test_folder = Path.joinpath(Path('Dataset'), Path('translated_test'))
+    test_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
+
+    train_files, train_d_pr_corpus, train_d_tk_corpus, train_q_pr_corpus, train_q_tk_corpus = \
+        tokenize_corpus_from_dict(train_dict, train_folder)
+    test_files, test_d_pr_corpus, test_d_tk_corpus, test_q_pr_corpus, test_q_tk_corpus = \
+        tokenize_corpus_from_dict(test_dict, test_folder)
+
+    model = BM25Custom(corpus=train_d_tk_corpus, k1=3.0, b=1.0, test_corpus=test_d_tk_corpus)
+
+    iterate_dataset_with_bm25(model, train_files, train_dict, train_q_pr_corpus, train_q_tk_corpus, 'train')
+    iterate_dataset_with_bm25(model, test_files, test_dict, test_q_pr_corpus, test_q_tk_corpus, 'test')
