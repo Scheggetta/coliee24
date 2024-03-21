@@ -1,8 +1,9 @@
 import os
 import json
-from multiprocessing import Pool, cpu_count
 from pathlib import Path
 import pickle
+import signal
+from multiprocessing import Pool, cpu_count
 
 import nltk
 from nltk.tokenize import RegexpTokenizer
@@ -135,6 +136,50 @@ def tokenize_corpus_from_dict(files_dict, folder):
     return files, d_preprocessed_corpus, d_tokenized_corpus, q_preprocessed_corpus, q_tokenized_corpus
 
 
+def evaluate_query(args):
+    model, files, files_dict, q_name, q_text, mode, return_results, get_top_n = args
+
+    if return_results:
+        results = dict()
+        if mode == 'train':
+            scores = model.get_scores(q_text)
+        elif mode == 'test':
+            scores = model.get_test_scores(q_text)
+        for d_name, score in zip(files, scores):
+            if d_name != q_name:
+                results[(q_name, d_name)] = score
+
+    if get_top_n:
+        pe = files_dict[q_name]
+        pe_idxs = [files.index(x) for x in pe]
+
+        relevant_cases = len(pe)
+
+        if mode == 'train':
+            indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N + 1)
+        elif mode == 'test':
+            indexes = model.get_test_top_n_indexes(q_text, n=BM25_TOP_N + 1)
+        predicted_pe_idxs = [idx for idx in indexes if idx != files.index(q_name)]
+
+        gt = torch.zeros(len(files))
+        gt[pe_idxs] = 1
+        targets = torch.zeros(len(files))
+        targets[predicted_pe_idxs] = 1
+
+        correctly_retrieved_cases = len(gt[(gt == 1) & (targets == 1)])
+        retrieved_cases = len(targets[targets == 1])
+
+    # Send a signal to the father process that the query has been processed
+    os.kill(os.getppid(), signal.SIGUSR1)
+
+    if return_results and get_top_n:
+        return results, correctly_retrieved_cases, retrieved_cases, relevant_cases
+    if return_results:
+        return results
+    if get_top_n:
+        return correctly_retrieved_cases, retrieved_cases, relevant_cases
+
+
 def iterate_dataset_with_bm25(model,
                               files,
                               files_dict,
@@ -149,56 +194,41 @@ def iterate_dataset_with_bm25(model,
     results = dict()
     pbar = tqdm(total=len(q_pr_corpus), desc='BM25 %s' % mode)
 
-    f1 = 0.0
-    i = 0
+    # Define a signal handler
+    def signal_handler(signum, frame):
+        pbar.update(1)
+    signal.signal(signal.SIGUSR1, signal_handler)
 
     correctly_retrieved_cases = 0
     retrieved_cases = 0
     relevant_cases = 0
 
-    for q_name, _ in q_pr_corpus:
-        q_text = q_tk_corpus[i]
+    args = [(model, files, files_dict, q_name, q_tk_corpus[i], mode, return_results, get_top_n)
+            for i, (q_name, _) in enumerate(q_pr_corpus)]
 
-        if return_results:
-            if mode == 'train':
-                scores = model.get_scores(q_text)
-            elif mode == 'test':
-                scores = model.get_test_scores(q_text)
-            for d_name, score in zip(files, scores):
-                if d_name != q_name:
-                    results[(q_name, d_name)] = score
+    pool = Pool(cpu_count())
+    outputs_list = pool.map(evaluate_query, args)
 
-        if get_top_n:
-            pe = files_dict[q_name]
-            pe_idxs = [files.index(x) for x in pe]
-
-            relevant_cases += len(pe)
-
-            if mode == 'train':
-                indexes = model.get_top_n_indexes(q_text, n=BM25_TOP_N+1)
-            elif mode == 'test':
-                indexes = model.get_test_top_n_indexes(q_text, n=BM25_TOP_N+1)
-            predicted_pe_idxs = [idx for idx in indexes if idx != files.index(q_name)]
-
-            gt = torch.zeros(len(files))
-            gt[pe_idxs] = 1
-            targets = torch.zeros(len(files))
-            targets[predicted_pe_idxs] = 1
-
-            correctly_retrieved_cases += len(gt[(gt == 1) & (targets == 1)])
-            retrieved_cases += len(targets[targets == 1])
-            precision = correctly_retrieved_cases / retrieved_cases
-            recall = correctly_retrieved_cases / relevant_cases
-            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-
-            pbar.set_description(f'pre: {precision:.4f} - '
-                                 f'rec: {recall:.4f} - '
-                                 f'f1: {f1_score:.4f}')
-
-        i += 1
-        pbar.update()
     pbar.close()
 
+    for outputs in outputs_list:
+        if return_results and get_top_n:
+            results.update(outputs[0])
+            correctly_retrieved_cases += outputs[1]
+            retrieved_cases += outputs[2]
+            relevant_cases += outputs[3]
+        elif return_results:
+            results.update(outputs)
+        elif get_top_n:
+            correctly_retrieved_cases += outputs[0]
+            retrieved_cases += outputs[1]
+            relevant_cases += outputs[2]
+
+    if get_top_n:
+        precision = correctly_retrieved_cases / retrieved_cases
+        recall = correctly_retrieved_cases / relevant_cases
+        f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+        print(f'Final metrics: pre: {precision:.4f} - rec: {recall:.4f} - f1: {f1_score:.4f}')
     if return_results:
         return results
 

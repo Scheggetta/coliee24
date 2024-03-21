@@ -155,13 +155,16 @@ def get_gpt_embeddings(folder_path: Path, selected_dict: dict):
             assert len(e) % EMB_IN == 0
 
             e = torch.Tensor(e).view(n_paragraphs, EMB_IN).mean(dim=0)
+
+            # This is for taking only the first output embedding of the gpt model
             # e = torch.Tensor(e[:EMB_IN])
+
             embeddings[file] = e
 
     return embeddings
 
 
-def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, load=False):
+def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, load=False, invert=False):
     if not load and json_dict is None:
         raise ValueError('json_dict is None and load is False')
 
@@ -170,6 +173,11 @@ def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, l
             train_dict = pickle.load(f)
         with open('Dataset/val_dict.pkl', 'rb') as f:
             val_dict = pickle.load(f)
+
+        if invert:
+            temp = train_dict
+            train_dict = val_dict
+            val_dict = temp
         return train_dict, val_dict
 
     set_random_seeds(seed)
@@ -180,6 +188,10 @@ def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, l
     train_size = ceil(len(json_dict) * split_ratio)
     train_dict = {key: json_dict[key] for key in keys[:train_size]}
     val_dict = {key: json_dict[key] for key in keys[train_size:]}
+    if invert:
+        temp = train_dict
+        train_dict = val_dict
+        val_dict = temp
 
     if save:
         with open('Dataset/train_dict.pkl', 'wb') as f:
@@ -190,16 +202,23 @@ def split_dataset(json_dict=None, split_ratio=SPLIT_RATIO, seed=42, save=True, l
     return train_dict, val_dict
 
 
-def create_dataloaders(dataset_type, load=True):
+def create_dataloaders(dataset_type,
+                       json_dict=None,
+                       split_ratio=SPLIT_RATIO,
+                       seed=42,
+                       save=False,
+                       load=True,
+                       invert=False
+                       ):
     training_dataloader = None
     if dataset_type == 'train':
-        train_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_train_labels_2024.json'))))
-        train_dict, qd_dict = split_dataset(load=load, save=False, json_dict=train_dict)
+        train_dict, qd_dict = split_dataset(json_dict=json_dict, split_ratio=split_ratio, seed=seed, save=save,
+                                            load=load, invert=invert)
         training_embeddings = get_gpt_embeddings(folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                                  selected_dict=train_dict)
 
         dataset = TrainingDataset(training_embeddings, train_dict)
-        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=False)
+        training_dataloader = DataLoader(dataset, collate_fn=custom_collate_fn, batch_size=32, shuffle=True)
     else:
         qd_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
 

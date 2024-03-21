@@ -6,6 +6,8 @@ FRENCH_THRESHOLD = 0.4
 EMB_IN = 1536
 EMB_OUT = 50            # 50
 HIDDEN_UNITS = 650      # recall: 240, f1_score: 650
+RECALL_HIDDEN_UNITS = 240
+F1_HIDDEN_UNITS = 650
 
 # Torch Dataset
 SAMPLE_SIZE = 50              # 50 - Negative samples per query

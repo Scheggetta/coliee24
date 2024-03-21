@@ -2,22 +2,18 @@ import os
 import json
 import warnings
 from pathlib import Path
-from datetime import datetime
 import pickle
 import math
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from catboost import CatBoostRanker, Pool
 
 from utils import set_random_seeds, get_best_weights
 from parameters import *
-from setlist import SetList
 from dataset import get_gpt_embeddings, create_dataloaders, split_dataset
 from embedding_head import EmbeddingHead, iterate_dataset_with_model
-from baselines.bm25_inference import BM25Custom, tokenize
 
 SIMILARITY_FUNCTION_DIM_0 = torch.nn.CosineSimilarity(dim=0)
 SIMILARITY_FUNCTION_DIM_1 = torch.nn.CosineSimilarity(dim=1)
@@ -25,22 +21,33 @@ set_random_seeds(600)
 
 
 def create_tabular_datasets():
-    train_dataloader, val_dataloader = create_dataloaders('train')
+    _, train_dataloader = create_dataloaders('train', invert=True)
+    _, val_dataloader = create_dataloaders('train', invert=False)
     train_dict, val_dict = split_dataset(load=True)
+
+    train_bm25_scores = pickle.load(open('Dataset/bm25_train_results.pkl', 'rb'))
+    test_bm25_scores = pickle.load(open('Dataset/bm25_test_results.pkl', 'rb'))
+    train_tfidf_scores = pickle.load(open('Dataset/tfidf_train_results.pkl', 'rb'))
+    test_tfidf_scores = pickle.load(open('Dataset/tfidf_test_results.pkl', 'rb'))
+
     train_group_id, train_features, train_labels, train_evidence_names = \
         get_tabular_features(qd_dataloader=train_dataloader,
                              files_dict=train_dict,
                              embeddings=get_gpt_embeddings(
                                  folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                  selected_dict=train_dict),
-                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_train')))
+                             bm25_scores=train_bm25_scores,
+                             tfidf_scores=train_tfidf_scores
+                             )
     val_group_id, val_features, val_labels, val_evidence_names = \
         get_tabular_features(qd_dataloader=val_dataloader,
                              files_dict=val_dict,
                              embeddings=get_gpt_embeddings(
                                  folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                  selected_dict=val_dict),
-                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_train')))
+                             bm25_scores=train_bm25_scores,
+                             tfidf_scores=train_tfidf_scores
+                             )
 
     normalization_model = train_normalization_model(train_features, val_features)
     train_features = normalization_model(train_features)
@@ -54,7 +61,9 @@ def create_tabular_datasets():
                              embeddings=get_gpt_embeddings(
                                  folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_test')),
                                  selected_dict=test_dict),
-                             preprocessing_folder_path=Path.joinpath(Path('Dataset'), Path(f'translated_test')))
+                             bm25_scores=test_bm25_scores,
+                             tfidf_scores=test_tfidf_scores
+                             )
     test_features = normalization_model(test_features)
 
     dataset = {
@@ -96,36 +105,23 @@ def train_normalization_model(train_features, val_features):
     return Normalizer(params)
 
 
-def get_tabular_features(qd_dataloader, files_dict, embeddings, preprocessing_folder_path):
-    recall_model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
+def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfidf_scores):
+    q_dataloader, d_dataloader = qd_dataloader
+
+    recall_model = EmbeddingHead(hidden_units=RECALL_HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
     recall_model.load_weights(get_best_weights('recall'))
 
-    f1_model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
+    f1_model = EmbeddingHead(hidden_units=F1_HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
     f1_model.load_weights(get_best_weights('val_f1_score'))
     f1_model.eval()
-
-    files = []
-    for key, values in files_dict.items():
-        files.append(key)
-        files.extend(values)
-    files = SetList(files)
-
-    d_preprocessed_corpus = [(filename, open(os.path.join(preprocessing_folder_path, filename), encoding='utf-8')
-                              .read()) for filename in files]
-    d_tokenized_corpus = tokenize(d_preprocessed_corpus)
-
-    q_preprocessed_corpus = [(filename, open(os.path.join(preprocessing_folder_path, filename), encoding='utf-8')
-                              .read()) for filename in list(files_dict.keys())]
-    q_tokenized_corpus = tokenize(q_preprocessed_corpus)
-
-    bag_model = BM25Custom(corpus=d_tokenized_corpus, k1=3.0, b=1.0)
 
     top_n_scores = [x for x in iterate_dataset_with_model(recall_model, qd_dataloader,
                                                           pe_cutoff=PE_CUTOFF,
                                                           score_function=SIMILARITY_FUNCTION_DIM_1,
-                                                          score_iterator_mode=True)]
+                                                          score_iterator_mode=True,
+                                                          verbose=True)]
 
-    pbar = tqdm(total=len(q_preprocessed_corpus), desc='Creating tabular dataset')
+    pbar = tqdm(total=len(q_dataloader.dataset), desc='Creating tabular dataset')
 
     evidence_names = []
     group_id = []
@@ -134,18 +130,22 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, preprocessing_fo
     for q_idx, recall_model_scores in enumerate(top_n_scores):
         q_name = list(files_dict.keys())[q_idx]
         q_emb = embeddings[q_name].to('cuda')
-        bm25_scores = bag_model.get_scores(q_tokenized_corpus[q_idx])
+        # bm25_scores = bag_model.get_scores(q_tokenized_corpus[q_idx])
 
         for d_name, _ in recall_model_scores:
             d_emb = embeddings[d_name].to('cuda')
 
             f1_model_q, f1_model_d = f1_model(q_emb, doc=d_emb)
             f1_model_score = float(SIMILARITY_FUNCTION_DIM_0(f1_model_q, f1_model_d))
+            f1_model_dot_score = float(torch.dot(f1_model_q, f1_model_d))
             gpt_score = float(SIMILARITY_FUNCTION_DIM_0(q_emb, d_emb))
-            bm25_score = float(bm25_scores[files.index(d_name)])
+            gpt_dot_score = float(torch.dot(q_emb, d_emb))
+            # bm25_score = float(bm25_scores[files.index(d_name)])
+            bm25_score = bm25_scores[(q_name, d_name)]
+            tfidf_score = tfidf_scores[(q_name, d_name)]
 
             group_id.append(q_idx)
-            features.append([f1_model_score, gpt_score, bm25_score])
+            features.append([f1_model_score, f1_model_dot_score, gpt_score, gpt_dot_score, bm25_score, tfidf_score])
 
         pe_names = list(set(files_dict[q_name]))
         d_names = [x[0] for x in recall_model_scores]
