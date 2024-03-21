@@ -164,7 +164,9 @@ def apply_cutoff(arr):
     return arr
 
 
-def convert_scores(scores, targets):
+def convert_scores(scores, targets, predicted_evidences):
+    predicted_evidences = {k: data_filter(k, v) for k, v in predicted_evidences.items()}
+    queries = list(predicted_evidences.keys())
     results = np.stack((scores, targets), axis=2)
     results[:, ::-1, :].sort(axis=1)
     # Shape: (n_queries, pe_cutoff, 2)
@@ -204,6 +206,23 @@ def get_missed_positives(e_dict, mode='test'):
             if e not in e_dict[q]:
                 missed_positives += 1
     return missed_positives
+
+
+def index_to_query(idx):
+    pass
+
+
+def data_filter(query, predicted_evidences):
+    dates = json.load(open('Dataset/dates.json'))
+    reasonable_date_range = (1970, 2016)
+    query_date = (query, dates[query])
+
+    def date_threshold(x, query_flag=0):
+        return x if x[1] is not None and reasonable_date_range[0] <= int(x[1]) <= reasonable_date_range[1] else (x[0], reasonable_date_range[query_flag])
+
+    query_date = date_threshold(query_date, 1)
+    evidences_dates = list(map(date_threshold, [(e, dates[e]) for e in predicted_evidences]))
+    return list(filter(lambda x: int(x[1]) <= int(query_date[1]), evidences_dates))
 
 
 if __name__ == '__main__':
@@ -247,7 +266,7 @@ if __name__ == '__main__':
     Y = Y.reshape(n_queries, PE_CUTOFF)
     gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
 
-    res = convert_scores(Y, gt)
+    res = convert_scores(Y, gt, test_predicted_evidences)
     metrics = get_metrics(res, missed_positives=get_missed_positives(test_predicted_evidences, mode='test'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
 

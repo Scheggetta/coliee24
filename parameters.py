@@ -44,7 +44,7 @@ DROPOUT_RATE = 0.0  # 0.2
 CATBOOST_SIM_RATIO = 0.8           # 0.8
 CATBOOST_WHOLE_DATASET = True     # False - If True, the whole training dataset is used for training;
                                    # otherwise the training dataset is split into train and validation sets
-CATBOOST_LOAD_MODEL = False         # False
+CATBOOST_LOAD_MODEL = True         # False
 
 
 def set_sample_size(n):

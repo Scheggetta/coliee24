@@ -68,3 +68,4 @@ catboost_info/
 
 en_fr.argosmodel
 fr_en.argosmodel
+catboost_model.bin
