@@ -157,16 +157,43 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
 
 
 def apply_cutoff(arr):
-    mask = arr < arr[0] * CATBOOST_SIM_RATIO
-    # mask = arr < CATBOOST_THRESHOLD
-    arr[mask] = 0
-    arr[~mask] = 1
+    if CATBOOST_DYNAMIC_CUTOFF:
+        mask = arr < arr[0] * CATBOOST_SIM_RATIO
+        arr[mask] = 0
+        arr[~mask] = 1
+    else:
+        cutoff = CATBOOST_STATIC_CUTOFF
+        arr[:cutoff] = 1
+        arr[cutoff:] = 0
     return arr
 
 
+def date_filter(query, pr_e_list, dates_json, catboost_date_range_filter=CATBOOST_DATE_RANGE_FILTER):
+    low_bound, high_bound = catboost_date_range_filter
+
+    query_year = dates_json[query]
+    if query_year is None or not low_bound <= query_year <= high_bound:
+        query_year = high_bound
+
+    pr_e_years = [dates_json[e_name] for e_name in pr_e_list]
+    for i in range(len(pr_e_years)):
+        if pr_e_years[i] is None or not low_bound <= pr_e_years[i] <= high_bound:
+            pr_e_years[i] = low_bound
+
+    return [e_name for e_name, e_year in zip(pr_e_list, pr_e_years) if query_year >= e_year]
+
+
 def convert_scores(scores, targets, predicted_evidences):
-    predicted_evidences = {k: data_filter(k, v) for k, v in predicted_evidences.items()}
-    queries = list(predicted_evidences.keys())
+    if CATBOOST_DATE_FILTER:
+        dates_json = json.load(open('Dataset/dates.json'))
+
+        for q_idx, (q_name, pr_e_list) in enumerate(predicted_evidences.items()):
+            filtered_pr_e_list = date_filter(q_name, pr_e_list, dates_json)
+
+            for e_idx, e_name in enumerate(pr_e_list):
+                if e_name not in filtered_pr_e_list:
+                    scores[q_idx, e_idx] = -np.inf
+
     results = np.stack((scores, targets), axis=2)
     results[:, ::-1, :].sort(axis=1)
     # Shape: (n_queries, pe_cutoff, 2)
@@ -206,23 +233,6 @@ def get_missed_positives(e_dict, mode='test'):
             if e not in e_dict[q]:
                 missed_positives += 1
     return missed_positives
-
-
-def index_to_query(idx):
-    pass
-
-
-def data_filter(query, predicted_evidences):
-    dates = json.load(open('Dataset/dates.json'))
-    reasonable_date_range = (1970, 2016)
-    query_date = (query, dates[query])
-
-    def date_threshold(x, query_flag=0):
-        return x if x[1] is not None and reasonable_date_range[0] <= int(x[1]) <= reasonable_date_range[1] else (x[0], reasonable_date_range[query_flag])
-
-    query_date = date_threshold(query_date, 1)
-    evidences_dates = list(map(date_threshold, [(e, dates[e]) for e in predicted_evidences]))
-    return list(filter(lambda x: int(x[1]) <= int(query_date[1]), evidences_dates))
 
 
 if __name__ == '__main__':

@@ -400,7 +400,7 @@ def extract_dates():
             dates += re.findall(r'\d{1,2} ' + month + r' \d{4}', text)
             timestamps = [date.split(' ')[-1] for date in dates]
             timestamps.sort(reverse=True)
-            dates_dict[filename] = timestamps[0] if timestamps else None
+            dates_dict[filename] = int(timestamps[0]) if timestamps else None
     json_path = Path.joinpath(Path('Dataset'), Path('dates.json'))
     with open(json_path, 'w') as f:
         json.dump(dates_dict, f, indent=4)
