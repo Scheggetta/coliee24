@@ -224,28 +224,31 @@ if __name__ == '__main__':
     train_pool = Pool(data=train_features, label=train_labels, group_id=train_group_id)
     val_pool = Pool(data=val_features, label=val_labels, group_id=val_group_id)
     test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)
+    whole_pool = Pool(data=train_features + val_features, label=train_labels + val_labels,
+                      group_id=train_group_id + [x + 1024 for x in val_group_id])
 
     train_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
     val_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
     test_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
+    whole_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
 
     # Train the model
-    model = CatBoostRanker(iterations=1000, loss_function='YetiRank', task_type='CPU')
-    model.fit(train_pool, eval_set=val_pool, verbose=True)
+    model = CatBoostRanker(loss_function='YetiRank', task_type='CPU')
+    model.fit(whole_pool, verbose=True)
     model.save_model('catboost_model.bin')
 
     # Y = model._predict(test_pool, 'Probability', 0, 0, -1, None,
     #                    parent_method_name='predict')[:, 0]
-    Y = model.predict(val_pool)
+    Y = model.predict(test_pool)
 
-    n_queries = len(set(val_group_id))
+    n_queries = len(set(test_group_id))
     Y = Y.reshape(n_queries, PE_CUTOFF)
-    gt = np.array(val_labels).reshape(n_queries, PE_CUTOFF)
+    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
 
     res = convert_scores(Y, gt)
-    metrics = get_metrics(res, missed_positives=get_missed_positives(val_predicted_evidences, mode='val'))
+    metrics = get_metrics(res, missed_positives=get_missed_positives(test_predicted_evidences, mode='test'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
 
-    model.get_feature_importance(val_pool, type='LossFunctionChange')
+    print(model.get_feature_importance(test_pool, type='PredictionValuesChange', prettified=True))
 
     print('Done!')
