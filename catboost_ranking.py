@@ -17,7 +17,6 @@ from embedding_head import EmbeddingHead, iterate_dataset_with_model
 
 SIMILARITY_FUNCTION_DIM_0 = torch.nn.CosineSimilarity(dim=0)
 SIMILARITY_FUNCTION_DIM_1 = torch.nn.CosineSimilarity(dim=1)
-set_random_seeds(600)
 
 
 def create_tabular_datasets():
@@ -130,7 +129,6 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
     for q_idx, recall_model_scores in enumerate(top_n_scores):
         q_name = list(files_dict.keys())[q_idx]
         q_emb = embeddings[q_name].to('cuda')
-        # bm25_scores = bag_model.get_scores(q_tokenized_corpus[q_idx])
 
         for d_name, _ in recall_model_scores:
             d_emb = embeddings[d_name].to('cuda')
@@ -140,7 +138,6 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
             f1_model_dot_score = float(torch.dot(f1_model_q, f1_model_d))
             gpt_score = float(SIMILARITY_FUNCTION_DIM_0(q_emb, d_emb))
             gpt_dot_score = float(torch.dot(q_emb, d_emb))
-            # bm25_score = float(bm25_scores[files.index(d_name)])
             bm25_score = bm25_scores[(q_name, d_name)]
             tfidf_score = tfidf_scores[(q_name, d_name)]
 
@@ -210,6 +207,7 @@ def get_missed_positives(e_dict, mode='test'):
 
 
 if __name__ == '__main__':
+    set_random_seeds(1984)
     # create_tabular_datasets()
     # quit()
 
@@ -224,21 +222,25 @@ if __name__ == '__main__':
     train_pool = Pool(data=train_features, label=train_labels, group_id=train_group_id)
     val_pool = Pool(data=val_features, label=val_labels, group_id=val_group_id)
     test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)
-    whole_pool = Pool(data=train_features + val_features, label=train_labels + val_labels,
-                      group_id=train_group_id + [x + 1024 for x in val_group_id])
+    if CATBOOST_WHOLE_DATASET:
+        train_pool = Pool(data=train_features + val_features, label=train_labels + val_labels,
+                          group_id=train_group_id + [x + len(set(train_group_id)) for x in val_group_id])
 
     train_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
     val_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
     test_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
-    whole_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
 
-    # Train the model
     model = CatBoostRanker(loss_function='YetiRank', task_type='CPU')
-    model.fit(whole_pool, verbose=True)
-    model.save_model('catboost_model.bin')
+    if CATBOOST_LOAD_MODEL:
+        model.load_model('catboost_model.bin')
+    else:
+        # Train the model
+        if CATBOOST_WHOLE_DATASET:
+            model.fit(train_pool, verbose=True)
+        else:
+            model.fit(train_pool, eval_set=val_pool, verbose=True)
+        model.save_model('catboost_model.bin')
 
-    # Y = model._predict(test_pool, 'Probability', 0, 0, -1, None,
-    #                    parent_method_name='predict')[:, 0]
     Y = model.predict(test_pool)
 
     n_queries = len(set(test_group_id))

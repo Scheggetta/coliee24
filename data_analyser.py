@@ -391,7 +391,8 @@ def plot_umap(mapper, embedding_dict, paragraphs, query, trans_dict):
 
 def extract_dates():
     dates_dict = {}
-    months_list = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    months_list = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
+                   'janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
     month = '(?:' + '|'.join(months_list) + ')'
     for folder in [Path.joinpath(Path('Dataset'), Path(f)) for f in ['task1_train_files_2024', 'task1_test_files_2024']]:
         for filename, text in [(x, open(Path.joinpath(folder, Path(x)), encoding='utf-8').read()) for x in os.listdir(folder)]:
@@ -407,6 +408,9 @@ def extract_dates():
 
 
 if __name__ == '__main__':
+    extract_dates()
+    quit(0)
+
     lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
     queries = list(lookup_table.keys())
     embedding_dict, paragraph_count = get_embedding_dict()
