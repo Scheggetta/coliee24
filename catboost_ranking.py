@@ -30,7 +30,7 @@ def create_tabular_datasets():
     train_tfidf_scores = pickle.load(open('Dataset/tfidf_train_results.pkl', 'rb'))
     test_tfidf_scores = pickle.load(open('Dataset/tfidf_test_results.pkl', 'rb'))
 
-    train_group_id, train_features, train_labels, train_evidence_names = \
+    train_group_id, train_features, train_labels, train_predicted_evidences = \
         get_tabular_features(qd_dataloader=train_dataloader,
                              files_dict=train_dict,
                              embeddings=get_gpt_embeddings(
@@ -39,7 +39,7 @@ def create_tabular_datasets():
                              bm25_scores=train_bm25_scores,
                              tfidf_scores=train_tfidf_scores
                              )
-    val_group_id, val_features, val_labels, val_evidence_names = \
+    val_group_id, val_features, val_labels, val_predicted_evidences = \
         get_tabular_features(qd_dataloader=val_dataloader,
                              files_dict=val_dict,
                              embeddings=get_gpt_embeddings(
@@ -55,7 +55,7 @@ def create_tabular_datasets():
 
     _, test_dataloader = create_dataloaders('test')
     test_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
-    test_group_id, test_features, test_labels, test_evidence_names = \
+    test_group_id, test_features, test_labels, test_predicted_evidences = \
         get_tabular_features(qd_dataloader=test_dataloader,
                              files_dict=test_dict,
                              embeddings=get_gpt_embeddings(
@@ -67,9 +67,9 @@ def create_tabular_datasets():
     test_features = normalization_model(test_features)
 
     dataset = {
-        'train': (train_group_id, train_features, train_labels, train_evidence_names),
-        'val': (val_group_id, val_features, val_labels, val_evidence_names),
-        'test': (test_group_id, test_features, test_labels, test_evidence_names),
+        'train': (train_group_id, train_features, train_labels, train_predicted_evidences),
+        'val': (val_group_id, val_features, val_labels, val_predicted_evidences),
+        'test': (test_group_id, test_features, test_labels, test_predicted_evidences),
         'normalization_model': normalization_model
     }
 
@@ -123,7 +123,7 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
 
     pbar = tqdm(total=len(q_dataloader.dataset), desc='Creating tabular dataset')
 
-    evidence_names = []
+    predicted_evidences = {}
     group_id = []
     features = []
     labels = []
@@ -151,12 +151,12 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
         d_names = [x[0] for x in recall_model_scores]
         # TODO: it could happen that the labels computed for a group are all zeros. Check if this breaks catboost
         labels.extend([1 if x in pe_names else 0 for x in d_names])
-        evidence_names.extend(d_names)
+        predicted_evidences[q_name] = d_names
 
         pbar.update(1)
     pbar.close()
 
-    return group_id, features, labels, evidence_names
+    return group_id, features, labels, predicted_evidences
 
 
 def apply_cutoff(arr):
@@ -188,12 +188,23 @@ def get_metrics(results, missed_positives):
     return precision, recall, f1_score
 
 
-def get_missed_positives(e_list):
-    json_dict = json.load(open(Path.joinpath(Path('Dataset'), Path(f'task1_test_labels_2024.json'))))
+def get_missed_positives(e_dict, mode='test'):
+    train_dict, val_dict = split_dataset(load=True)
+    test_dict = json.load(open(Path.joinpath(Path('Dataset'), Path('task1_test_labels_2024.json'))))
+
+    if mode == 'train':
+        json_dict = train_dict
+    elif mode == 'val':
+        json_dict = val_dict
+    elif mode == 'test':
+        json_dict = test_dict
+    else:
+        raise ValueError('Invalid mode')
+
     missed_positives = 0
     for q in json_dict.keys():
         for e in set(json_dict[q]):
-            if e not in e_list:
+            if e not in e_dict[q]:
                 missed_positives += 1
     return missed_positives
 
@@ -205,34 +216,36 @@ if __name__ == '__main__':
     # Load the pools
     with open('Dataset/tabular_dataset.pkl', 'rb') as f:
         dataset = pickle.load(f)
-    train_group_id, train_features, train_labels = dataset['train']
-    val_group_id, val_features, val_labels = dataset['val']
-    test_group_id, test_features, test_labels = dataset['test']
+    train_group_id, train_features, train_labels, train_predicted_evidences = dataset['train']
+    val_group_id, val_features, val_labels, val_predicted_evidences = dataset['val']
+    test_group_id, test_features, test_labels, test_predicted_evidences = dataset['test']
     normalization_model = dataset['normalization_model']
 
     train_pool = Pool(data=train_features, label=train_labels, group_id=train_group_id)
     val_pool = Pool(data=val_features, label=val_labels, group_id=val_group_id)
     test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)
 
-    train_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
-    val_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
-    test_pool.set_feature_names(['f1_model', 'gpt', 'bm25'])
+    train_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
+    val_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
+    test_pool.set_feature_names(['f1_model', 'f1_model_dot', 'gpt', 'gpt_dot', 'bm25', 'tfidf'])
 
     # Train the model
-    model = CatBoostRanker(loss_function='YetiRank', task_type='GPU')
-    model.fit(train_pool, eval_set=val_pool, verbose=False)
+    model = CatBoostRanker(iterations=1000, loss_function='YetiRank', task_type='CPU')
+    model.fit(train_pool, eval_set=val_pool, verbose=True)
     model.save_model('catboost_model.bin')
 
     # Y = model._predict(test_pool, 'Probability', 0, 0, -1, None,
     #                    parent_method_name='predict')[:, 0]
-    Y = model.predict(test_pool)
+    Y = model.predict(val_pool)
 
-    n_queries = len(set(test_group_id))
+    n_queries = len(set(val_group_id))
     Y = Y.reshape(n_queries, PE_CUTOFF)
-    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
+    gt = np.array(val_labels).reshape(n_queries, PE_CUTOFF)
 
     res = convert_scores(Y, gt)
-    metrics = get_metrics(res, missed_positives=0)
+    metrics = get_metrics(res, missed_positives=get_missed_positives(val_predicted_evidences, mode='val'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
+
+    model.get_feature_importance(val_pool, type='LossFunctionChange')
 
     print('Done!')

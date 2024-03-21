@@ -5,7 +5,7 @@ FRENCH_THRESHOLD = 0.4
 # Embedding head
 EMB_IN = 1536
 EMB_OUT = 50            # 50
-HIDDEN_UNITS = 650      # recall: 240, f1_score: 650
+HIDDEN_UNITS = 240      # recall: 240, f1_score: 650
 RECALL_HIDDEN_UNITS = 240
 F1_HIDDEN_UNITS = 650
 
@@ -26,8 +26,8 @@ PATIENCE = 5        # 5
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
-DYNAMIC_CUTOFF = True         # False
-PE_CUTOFF = 5                 # 5
+DYNAMIC_CUTOFF = False         # False
+PE_CUTOFF = 25                 # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.95
 
@@ -41,8 +41,7 @@ TFIDF_TOP_N = 10  # 5
 DROPOUT_RATE = 0.0  # 0.2
 
 # Catboost
-CATBOOST_SIM_RATIO = 0.9  # 0.9
-CATBOOST_THRESHOLD = 0.75  # 0.5
+CATBOOST_SIM_RATIO = 0.8  # 0.9
 
 
 def set_sample_size(n):
