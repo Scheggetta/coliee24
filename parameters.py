@@ -41,13 +41,13 @@ TFIDF_TOP_N = 10  # 5
 DROPOUT_RATE = 0.0  # 0.2
 
 # Catboost
-CATBOOST_DYNAMIC_CUTOFF = False     # False
-CATBOOST_SIM_RATIO = 0.795          # 0.8
-CATBOOST_STATIC_CUTOFF = 3          # 3
+CATBOOST_DYNAMIC_CUTOFF = False    # False
+CATBOOST_SIM_RATIO = 0.8           # 0.8
+CATBOOST_STATIC_CUTOFF = 3         # 3
 
-CATBOOST_WHOLE_DATASET = True      # False - If True, the whole training dataset is used for training;
+CATBOOST_WHOLE_DATASET = False      # False - If True, the whole training dataset is used for training;
                                     # otherwise the training dataset is split into train and validation sets
-CATBOOST_LOAD_MODEL = False                 # False
+CATBOOST_LOAD_MODEL = True                 # False
 CATBOOST_DATE_FILTER = False                # False
 CATBOOST_DATE_RANGE_FILTER = (1970, 2016)
 

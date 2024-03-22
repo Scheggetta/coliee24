@@ -24,10 +24,17 @@ def create_tabular_datasets():
     _, val_dataloader = create_dataloaders('train', invert=False)
     train_dict, val_dict = split_dataset(load=True)
 
-    train_bm25_scores = pickle.load(open('Dataset/bm25_train_results.pkl', 'rb'))
-    test_bm25_scores = pickle.load(open('Dataset/bm25_test_results.pkl', 'rb'))
-    train_tfidf_scores = pickle.load(open('Dataset/tfidf_train_results.pkl', 'rb'))
-    test_tfidf_scores = pickle.load(open('Dataset/tfidf_test_results.pkl', 'rb'))
+    # train_bm25_scores = pickle.load(open('Dataset/bm25_train_results.pkl', 'rb'))
+    # test_bm25_scores = pickle.load(open('Dataset/bm25_test_results.pkl', 'rb'))
+    # train_tfidf_scores = pickle.load(open('Dataset/tfidf_train_results.pkl', 'rb'))
+    # test_tfidf_scores = pickle.load(open('Dataset/tfidf_test_results.pkl', 'rb'))
+
+    train_bm25_scores = pickle.load(open('Dataset/bm25_train_results_0.8.pkl', 'rb'))
+    val_bm25_scores = pickle.load(open('Dataset/bm25_val_results_0.8.pkl', 'rb'))
+    test_bm25_scores = pickle.load(open('Dataset/bm25_test_results_0.8.pkl', 'rb'))
+    train_tfidf_scores = pickle.load(open('Dataset/tfidf_train_results_0.8.pkl', 'rb'))
+    val_tf_idf_scores = pickle.load(open('Dataset/tfidf_val_results_0.8.pkl', 'rb'))
+    test_tfidf_scores = pickle.load(open('Dataset/tfidf_test_results_0.8.pkl', 'rb'))
 
     train_group_id, train_features, train_labels, train_predicted_evidences = \
         get_tabular_features(qd_dataloader=train_dataloader,
@@ -44,8 +51,8 @@ def create_tabular_datasets():
                              embeddings=get_gpt_embeddings(
                                  folder_path=Path.joinpath(Path('Dataset'), Path('gpt_embed_train')),
                                  selected_dict=val_dict),
-                             bm25_scores=train_bm25_scores,
-                             tfidf_scores=train_tfidf_scores
+                             bm25_scores=val_bm25_scores,
+                             tfidf_scores=val_tf_idf_scores
                              )
 
     normalization_model = train_normalization_model(train_features, val_features)
@@ -158,6 +165,16 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
 
 def apply_cutoff(arr):
     if CATBOOST_DYNAMIC_CUTOFF:
+        for i in range(1, len(arr) + 1):
+            if arr[-i] == -np.inf:
+                arr[-i] = 0
+            elif arr[-i] < 0:
+                arr -= arr[-i]
+                break
+
+        # Normalize
+        arr /= arr.max()
+
         mask = arr < arr[0] * CATBOOST_SIM_RATIO
         arr[mask] = 0
         arr[~mask] = 1
