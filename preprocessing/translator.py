@@ -18,7 +18,7 @@ def translate_file(filepath, detector, translator):
 
         confidences = detector.compute_language_confidence_in_parallel(sentences, Language.FRENCH)
         for sentence, confidence in zip(sentences, confidences):
-            if confidence >= FRENCH_THRESHOLD:
+            if confidence >= SEUIL:
                 translation += translator.translate(sentence) + '\n'
             else:
                 translation += sentence + '\n'

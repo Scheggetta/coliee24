@@ -1,6 +1,6 @@
 # Preprocessing
 PREPROCESSING_DATASET_TYPE = 'test'  # 'train' or 'test'
-FRENCH_THRESHOLD = 0.4
+SEUIL = 0.4  # French Threshold
 
 # Embedding head
 EMB_IN = 1536
@@ -26,7 +26,7 @@ PATIENCE = 5        # 5
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
-DYNAMIC_CUTOFF = False         # False
+DYNAMIC_CUTOFF = True         # False
 PE_CUTOFF = 25                 # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.95
@@ -47,7 +47,7 @@ CATBOOST_STATIC_CUTOFF = 3         # 3
 
 CATBOOST_WHOLE_DATASET = False      # False - If True, the whole training dataset is used for training;
                                     # otherwise the training dataset is split into train and validation sets
-CATBOOST_LOAD_MODEL = True                 # False
+CATBOOST_LOAD_MODEL = False                 # False
 CATBOOST_DATE_FILTER = False                # False
 CATBOOST_DATE_RANGE_FILTER = (1970, 2016)
 

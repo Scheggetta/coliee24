@@ -14,6 +14,7 @@ from utils import set_random_seeds, get_best_weights
 from parameters import *
 from dataset import get_gpt_embeddings, create_dataloaders, split_dataset
 from embedding_head import EmbeddingHead, iterate_dataset_with_model
+from colorama import Fore, Style
 
 SIMILARITY_FUNCTION_DIM_0 = torch.nn.CosineSimilarity(dim=0)
 SIMILARITY_FUNCTION_DIM_1 = torch.nn.CosineSimilarity(dim=1)
@@ -114,7 +115,8 @@ def train_normalization_model(train_features, val_features):
 def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfidf_scores):
     q_dataloader, d_dataloader = qd_dataloader
 
-    recall_model = EmbeddingHead(hidden_units=RECALL_HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
+    recall_model = EmbeddingHead(hidden_units=RECALL_HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to(
+        'cuda')
     recall_model.load_weights(get_best_weights('recall'))
 
     f1_model = EmbeddingHead(hidden_units=F1_HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE).to('cuda')
@@ -258,7 +260,11 @@ if __name__ == '__main__':
     # quit()
 
     # Load the pools
-    with open('Dataset/tabular_dataset.pkl', 'rb') as f:
+    if CATBOOST_WHOLE_DATASET:
+        dataset_path = Path.joinpath(Path('Dataset'), Path('tabular_dataset.pkl'))
+    else:
+        dataset_path = Path.joinpath(Path('Dataset'), Path('tabular_dataset_split.pkl'))
+    with open(dataset_path, 'rb') as f:
         dataset = pickle.load(f)
     train_group_id, train_features, train_labels, train_predicted_evidences = dataset['train']
     val_group_id, val_features, val_labels, val_predicted_evidences = dataset['val']
@@ -278,25 +284,28 @@ if __name__ == '__main__':
 
     model = CatBoostRanker(loss_function='YetiRank', task_type='CPU')
     if CATBOOST_LOAD_MODEL:
-        model.load_model('catboost_model.bin')
+        if CATBOOST_WHOLE_DATASET:
+            model.load_model('catboost_model.bin')
+        else:
+            model.load_model('catboost_model_split.bin')
     else:
         # Train the model
         if CATBOOST_WHOLE_DATASET:
             model.fit(train_pool, verbose=True)
+            model.save_model('catboost_model.bin')
         else:
             model.fit(train_pool, eval_set=val_pool, verbose=True)
-        model.save_model('catboost_model.bin')
+            model.save_model('catboost_model_split.bin')
 
-    Y = model.predict(test_pool)
+    Y = model.predict(val_pool)
 
-    n_queries = len(set(test_group_id))
+    n_queries = len(set(val_group_id))
     Y = Y.reshape(n_queries, PE_CUTOFF)
-    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
+    gt = np.array(val_labels).reshape(n_queries, PE_CUTOFF)
 
-    res = convert_scores(Y, gt, test_predicted_evidences)
-    metrics = get_metrics(res, missed_positives=get_missed_positives(test_predicted_evidences, mode='test'))
+    res = convert_scores(Y, gt, val_predicted_evidences)
+    metrics = get_metrics(res, missed_positives=get_missed_positives(val_predicted_evidences, mode='val'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
-
     print(model.get_feature_importance(test_pool, type='PredictionValuesChange', prettified=True))
 
     print('Done!')

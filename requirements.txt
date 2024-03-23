@@ -19,6 +19,7 @@ dask-expr
 
 pyYAML
 gdown
+colorama
 
 nltk
 argostranslate

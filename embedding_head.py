@@ -14,7 +14,7 @@ from dataset import create_dataloaders
 
 
 class EmbeddingHead(torch.nn.Module):
-    def __init__(self, hidden_units, emb_out, dropout_rate):
+    def __init__(self, hidden_units, emb_out, dropout_rate=0):
         super(EmbeddingHead, self).__init__()
         self.linear1 = torch.nn.Linear(EMB_IN, hidden_units)
         self.linear2 = torch.nn.Linear(hidden_units, emb_out)
@@ -80,8 +80,12 @@ def train(model,
           metric='val_f1_score',
           save_weights=True,
           verbose=True,
+          suppress_warnings=False,
           **kwargs
           ):
+    if suppress_warnings:
+        warnings.filterwarnings("ignore", category=UserWarning)
+
     if optimizer is None:
         warnings.warn('WARNING: `optimizer` of `train` function is set to None. Using Adam with default learning rate.')
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -233,8 +237,12 @@ def iterate_dataset_with_model(model,
                                score_function=None,
                                iterator_mode=False,
                                score_iterator_mode=False,
-                               verbose=False
+                               verbose=False,
+                               suppress_warnings=False
                                ):
+    if suppress_warnings:
+        warnings.filterwarnings("ignore", category=UserWarning)
+
     if model is None:
         warnings.warn('WARNING: `model` of `iterate_dataset_with_model` function is set to None. No embedding '
                       'transformation will be done.')
