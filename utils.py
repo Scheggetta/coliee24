@@ -82,10 +82,15 @@ def average_negative_evidences(tensor_list):
     return total_length / num_tensors
 
 
-def get_best_weights(metric='val_f1_score', mode=max):
+def get_best_weights(metric='val_f1_score', mode='max'):
+    if metric in ['precision', 'recall', 'val_f1_score'] and mode != 'max':
+        raise ValueError('Invalid mode for the chosen metric! Only `max` is allowed for precision, recall and f1_score!')
+    if metric in ['train_loss', 'val_loss'] and mode != 'min':
+        raise ValueError('Invalid mode for the chosen metric! Only `min` is allowed for train_loss and val_loss!')
+
     weights = [x for x in os.listdir('Checkpoints') if x.endswith('.pt') and metric in x]
     paths = sorted(weights, key=lambda x: float(x.split(sep='_')[-1][:-3]))
-    assert len(paths) > 0, "No weights found! Please train the model on the chosen metric first!"
+    assert len(paths) > 0, 'No weights found! Please train the model on the chosen metric first!'
     best_path = paths[-1] if mode == 'max' else paths[0]
     return Path.joinpath(Path('Checkpoints'), Path(best_path))
 

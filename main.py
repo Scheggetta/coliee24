@@ -52,7 +52,7 @@ random_metrics = next(iterate_dataset_with_model(model=None,
                                                  suppress_warnings=True
                                                  ))
 model = EmbeddingHead(hidden_units=F1_HIDDEN_UNITS, emb_out=EMB_OUT).to('cuda')
-model.load_weights(get_best_weights('train_loss', mode='min'))
+model.load_weights(get_best_weights('val_f1_score', mode='max'))
 val_loss_function = torch.nn.CosineEmbeddingLoss(margin=COSINE_LOSS_MARGIN, reduction='none')
 
 emb_head_results = next(iterate_dataset_with_model(model, qd_dataloader,

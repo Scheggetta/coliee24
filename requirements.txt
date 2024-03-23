@@ -18,8 +18,8 @@ umap-learn[plot]
 dask-expr
 
 pyYAML
-gdown
 colorama
+tabulate
 
 nltk
 argostranslate

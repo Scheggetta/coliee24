@@ -102,6 +102,17 @@ def train(model,
         else:
             raise ValueError('`metric` must be one of `precision`, `recall`, `val_f1_score`, `train_loss` or '
                              '`val_loss`.')
+    else:
+        if not isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            warnings.warn('`lr_scheduler` should be an instance of ReduceLROnPlateau. If not, unexpected behavior may '
+                          'occur.')
+        if metric in ['precision', 'recall', 'val_f1_score'] and (not hasattr(lr_scheduler, 'mode') or
+                                                                  lr_scheduler.mode != 'max'):
+            warnings.warn('`metric` is set to precision, recall or val_f1_score, but `lr_scheduler` mode is not max. '
+                          'This may lead to unexpected behavior.')
+        if metric in ['train_loss', 'val_loss'] and (not hasattr(lr_scheduler, 'mode') or lr_scheduler.mode != 'min'):
+            warnings.warn('`metric` is set to train_loss or val_loss, but `lr_scheduler` mode is not min. This may '
+                          'lead to unexpected behavior.')
 
     if loss_function is None:
         loss_function = cosine_loss_function
