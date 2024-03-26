@@ -1,24 +1,29 @@
-import nltk
 import os
-from nltk.tokenize import RegexpTokenizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-from scipy.special import softmax, kl_div, rel_entr
 import json
 from pathlib import Path
 import random
+import shutil
+import pickle
+
+import numpy as np
 import pandas as pd
+from scipy.special import softmax, kl_div, rel_entr
+from sklearn.metrics.pairwise import cosine_similarity
+import torch
+import re
+import nltk
+from nltk.tokenize import RegexpTokenizer
 from lingua import Language, LanguageDetectorBuilder
 from argostranslate import package, translate
-import re
-import shutil
 import umap
-import pickle
-import torch
-from parameters import EMB_IN
 import umap.plot
 import matplotlib.pyplot as plt
-import json
+
+from parameters import *
+from dataset import create_dataloaders
+from embedding_head import EmbeddingHead, iterate_dataset_with_model
+from utils import get_best_weights
+from catboost_ranking import Normalizer
 
 
 pd.set_option('display.max_columns', None)
@@ -408,8 +413,82 @@ def extract_dates():
 
 
 if __name__ == '__main__':
-    extract_dates()
-    quit(0)
+    # extract_dates()
+    # quit(0)
+
+    _, test_dataloader = create_dataloaders('test')
+    q_dataloader, d_dataloader = test_dataloader
+
+    model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE)
+    model.load_weights(get_best_weights('recall', mode='max'))
+
+    json_dict = json.load(open('Dataset/task1_test_labels_2024.json', 'r'))
+    documents = []
+    for key in json_dict.keys():
+        documents.append(key)
+        documents += json_dict[key]
+    documents = list(set(documents))
+
+    def get_reduced_embedding(_model, embedding):
+        embedding = _model.relu(_model.linear1(embedding))
+        return _model.linear2(embedding)
+
+    reduced_embeddings = {d_name: get_reduced_embedding(model, d_dataloader.dataset.embeddings_dict[d_name])
+                                                                .detach().numpy() for d_name in documents}
+    _all_embs = list(reduced_embeddings.values())
+    if not os.path.exists('Dataset/umap_mapper.pkl'):
+        mapper = umap.UMAP(metric='cosine').fit(_all_embs)
+        with open('Dataset/umap_mapper.pkl', 'wb') as f:
+            pickle.dump(mapper, f)
+    else:
+        mapper = pickle.load(open('Dataset/umap_mapper.pkl', 'rb'))
+
+    # plt.rcParams["figure.dpi"] = 1000
+    # umap.plot.points(mapper, width=1000, height=1000)
+    # plt.show()
+
+    dataset = pickle.load(open('Dataset/tabular_dataset.pkl', 'rb'))
+    test_group_id, test_features, test_labels, test_predicted_evidences = dataset['test']
+    _all_queries = list(json_dict.keys())
+
+    def separate_correctly_predicted_evidences(query, pr_e):
+        correct = []
+        wrong = []
+        for e in pr_e:
+            if e in json_dict[query]:
+                correct.append(e)
+            else:
+                wrong.append(e)
+        return ([reduced_embeddings[e] for e in correct],
+                [reduced_embeddings[e] for e in wrong],
+                [reduced_embeddings[e] for e in list(set(json_dict[query])) if e not in pr_e])
+
+    selected_query = _all_queries[3]
+    correct_embs, wrong_embs, false_negatives_embs = \
+        separate_correctly_predicted_evidences(selected_query, test_predicted_evidences[selected_query])
+
+    umap.plot.points(mapper, width=2000, height=2000)
+
+    if len(wrong_embs) > 0:
+        wrong_embs_proj = mapper.transform(wrong_embs)
+        plt.scatter(wrong_embs_proj[:, 0], wrong_embs_proj[:, 1], s=2, color='r', label='incorrect')
+    if len(false_negatives_embs) > 0:
+        false_negatives_embs_proj = mapper.transform(false_negatives_embs)
+        plt.scatter(false_negatives_embs_proj[:, 0], false_negatives_embs_proj[:, 1], s=2, color='darkviolet', label='false negatives')
+    if len(correct_embs) > 0:
+        correct_embs_proj = mapper.transform(correct_embs)
+        plt.scatter(correct_embs_proj[:, 0], correct_embs_proj[:, 1], s=2, color='darkgreen', label='correct')
+    q_emb = reduced_embeddings[selected_query].reshape(1, -1)
+    q_emb = mapper.transform(q_emb)
+    plt.scatter(q_emb[:, 0], q_emb[:, 1], s=2, color='goldenrod', label='query')
+
+    plt.tight_layout()
+    plt.show()
+
+    print()
+
+    quit()
+
 
     lookup_table = json.load(open('Dataset/task1_train_labels_2024.json', 'r'))
     queries = list(lookup_table.keys())
@@ -421,11 +500,9 @@ if __name__ == '__main__':
         print(f'picked query: {random_query}')
         plot_umap(mapper, embedding_dict, paragraph_count, random_query, lookup_table)
     quit(0)
-    par = get_parenthesis_freqs_dataset()
-    pass
 
-os.makedirs('Dataset/translated_preprocessed_train', exist_ok=True)
-for filename in os.listdir('Dataset/regex_preprocessed_train'):
-    print(filename)
-    compare_french_english_script(Path.joinpath(Path('Dataset/regex_preprocessed_train'), Path(filename)),
-                                  Path.joinpath(Path('Dataset/translated_preprocessed_train'), Path(filename)))
+# os.makedirs('Dataset/translated_preprocessed_train', exist_ok=True)
+# for filename in os.listdir('Dataset/regex_preprocessed_train'):
+#     print(filename)
+#     compare_french_english_script(Path.joinpath(Path('Dataset/regex_preprocessed_train'), Path(filename)),
+#                                   Path.joinpath(Path('Dataset/translated_preprocessed_train'), Path(filename)))
