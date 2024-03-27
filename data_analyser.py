@@ -448,7 +448,7 @@ if __name__ == '__main__':
     # umap.plot.points(mapper, width=1000, height=1000)
     # plt.show()
 
-    dataset = pickle.load(open('Dataset/tabular_dataset_split.pkl', 'rb'))
+    dataset = pickle.load(open('Dataset/tabular_dataset_25.pkl', 'rb'))
     test_group_id, test_features, test_labels, test_predicted_evidences = dataset['test']
     _all_queries = list(json_dict.keys())
 

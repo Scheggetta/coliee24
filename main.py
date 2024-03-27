@@ -83,7 +83,7 @@ print('||---------------------------------------------------||\n')
 
 model = CatBoostRanker(loss_function='YetiRank', task_type='CPU')
 model.load_model('catboost_model_split.bin')
-with open('Dataset/tabular_dataset_split.pkl', 'rb') as f:
+with open('Dataset/tabular_dataset_25.pkl', 'rb') as f:
     dataset = pickle.load(f)
 test_group_id, test_features, test_labels, test_predicted_evidences = dataset['test']
 test_pool = Pool(data=test_features, label=test_labels, group_id=test_group_id)

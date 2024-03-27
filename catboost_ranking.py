@@ -168,18 +168,20 @@ def get_tabular_features(qd_dataloader, files_dict, embeddings, bm25_scores, tfi
 def apply_cutoff(arr):
     if CATBOOST_DYNAMIC_CUTOFF:
         for i in range(1, len(arr) + 1):
-            if arr[-i] == -np.inf:
-                arr[-i] = 0
-            elif arr[-i] < 0:
+            if arr[-i] < 0 and arr[-i] != -np.inf:
                 arr -= arr[-i]
                 break
+        for i in range(1, len(arr) + 1):
+            if arr[-i] == -np.inf:
+                arr[-i] = 0
 
         # Normalize
-        arr /= arr.max()
+        if arr.max() != 0:
+            arr /= arr.max()
 
-        mask = arr < arr[0] * CATBOOST_SIM_RATIO
-        arr[mask] = 0
-        arr[~mask] = 1
+            mask = arr < arr[0] * CATBOOST_SIM_RATIO
+            arr[mask] = 0
+            arr[~mask] = 1
     else:
         cutoff = CATBOOST_STATIC_CUTOFF
         arr[:cutoff] = 1
@@ -213,6 +215,7 @@ def convert_scores(scores, targets, predicted_evidences):
                 if e_name not in filtered_pr_e_list:
                     scores[q_idx, e_idx] = -np.inf
 
+    # TODO: remove row below
     results = np.stack((scores, targets), axis=2)
     order = np.argsort(results[:, :, 0])[:, ::-1]
     ordered_scores = np.take_along_axis(results[:, :, 0], order, axis=1)
@@ -302,15 +305,15 @@ if __name__ == '__main__':
             model.fit(train_pool, eval_set=val_pool, verbose=True)
             model.save_model(f'catboost_model_{PE_CUTOFF}.bin')
 
-    Y = model.predict(test_pool)
+    Y = model.predict(val_pool)
 
-    n_queries = len(set(test_group_id))
+    n_queries = len(set(val_group_id))
     Y = Y.reshape(n_queries, PE_CUTOFF)
-    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
+    gt = np.array(val_labels).reshape(n_queries, PE_CUTOFF)
 
-    res = convert_scores(Y, gt, test_predicted_evidences)
-    metrics = get_metrics(res, missed_positives=get_missed_positives(test_predicted_evidences, mode='test'))
+    res = convert_scores(Y, gt, val_predicted_evidences)
+    metrics = get_metrics(res, missed_positives=get_missed_positives(val_predicted_evidences, mode='val'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
-    print(model.get_feature_importance(test_pool, type='PredictionValuesChange', prettified=True))
+    print(model.get_feature_importance(val_pool, type='PredictionValuesChange', prettified=True))
 
     print('Done!')
