@@ -26,7 +26,7 @@ PATIENCE = 5        # 5
 COOLDOWN = 3        # 3
 
 # Cutoff hyperparameters
-DYNAMIC_CUTOFF = True         # False
+DYNAMIC_CUTOFF = False         # False
 PE_CUTOFF = 25                 # 5
 MAX_DOCS = 10                 # 10
 RATIO_MAX_SIMILARITY = 0.95   # 0.95
@@ -41,8 +41,8 @@ TFIDF_TOP_N = 10  # 5
 DROPOUT_RATE = 0.0  # 0.2
 
 # Catboost
-CATBOOST_DYNAMIC_CUTOFF = False    # False
-CATBOOST_SIM_RATIO = 0.8           # 0.8
+CATBOOST_DYNAMIC_CUTOFF = True    # False
+CATBOOST_SIM_RATIO = 0.75           # 0.8
 CATBOOST_STATIC_CUTOFF = 3         # 3
 
 CATBOOST_WHOLE_DATASET = False      # False - If True, the whole training dataset is used for training;

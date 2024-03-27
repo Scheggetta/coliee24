@@ -421,6 +421,7 @@ if __name__ == '__main__':
 
     model = EmbeddingHead(hidden_units=HIDDEN_UNITS, emb_out=EMB_OUT, dropout_rate=DROPOUT_RATE)
     model.load_weights(get_best_weights('recall', mode='max'))
+    model.eval()
 
     json_dict = json.load(open('Dataset/task1_test_labels_2024.json', 'r'))
     documents = []
@@ -434,7 +435,7 @@ if __name__ == '__main__':
         return _model.linear2(embedding)
 
     reduced_embeddings = {d_name: get_reduced_embedding(model, d_dataloader.dataset.embeddings_dict[d_name])
-                                                                .detach().numpy() for d_name in documents}
+                                                                .detach() for d_name in documents}
     _all_embs = list(reduced_embeddings.values())
     if not os.path.exists('Dataset/umap_mapper.pkl'):
         mapper = umap.UMAP(metric='cosine').fit(_all_embs)
@@ -447,11 +448,13 @@ if __name__ == '__main__':
     # umap.plot.points(mapper, width=1000, height=1000)
     # plt.show()
 
-    dataset = pickle.load(open('Dataset/tabular_dataset.pkl', 'rb'))
+    dataset = pickle.load(open('Dataset/tabular_dataset_split.pkl', 'rb'))
     test_group_id, test_features, test_labels, test_predicted_evidences = dataset['test']
     _all_queries = list(json_dict.keys())
 
     def separate_correctly_predicted_evidences(query, pr_e):
+        sf = torch.nn.CosineSimilarity(dim=0)
+
         correct = []
         wrong = []
         for e in pr_e:
@@ -459,28 +462,45 @@ if __name__ == '__main__':
                 correct.append(e)
             else:
                 wrong.append(e)
-        return ([reduced_embeddings[e] for e in correct],
-                [reduced_embeddings[e] for e in wrong],
-                [reduced_embeddings[e] for e in list(set(json_dict[query])) if e not in pr_e])
 
-    selected_query = _all_queries[3]
-    correct_embs, wrong_embs, false_negatives_embs = \
+        false_negatives = list(set(json_dict[query]) - set(pr_e))
+        return (correct, [reduced_embeddings[e] for e in correct], [sf(reduced_embeddings[query], reduced_embeddings[e]) for e in correct],
+                wrong, [reduced_embeddings[e] for e in wrong], [sf(reduced_embeddings[query], reduced_embeddings[e]) for e in wrong],
+                false_negatives, [reduced_embeddings[e] for e in false_negatives], [sf(reduced_embeddings[query], reduced_embeddings[e]) for e in false_negatives])
+
+    selected_query = _all_queries[1]
+    print('Selected query:', selected_query)
+    (correct_l, correct_embs, correct_scores,
+     wrong_l, wrong_embs, wrong_scores,
+     false_negatives_l, false_negatives_embs, false_negatives_scores) = \
         separate_correctly_predicted_evidences(selected_query, test_predicted_evidences[selected_query])
 
-    umap.plot.points(mapper, width=2000, height=2000)
+    fig = plt.figure(figsize=(8, 8), dpi=800)
+    ax = fig.add_subplot(111)
+    umap.plot.points(mapper, ax=ax)
 
     if len(wrong_embs) > 0:
         wrong_embs_proj = mapper.transform(wrong_embs)
-        plt.scatter(wrong_embs_proj[:, 0], wrong_embs_proj[:, 1], s=2, color='r', label='incorrect')
+        for idx, w in enumerate(wrong_embs_proj):
+            plt.scatter(w[0], w[1], s=2, color='red')
+            plt.annotate(wrong_l[idx] + f' - {wrong_scores[idx]:.4f}', xy=(w[0], w[1]), xytext=(w[0]-.05, w[1]-.05), fontsize=1)
+
     if len(false_negatives_embs) > 0:
         false_negatives_embs_proj = mapper.transform(false_negatives_embs)
-        plt.scatter(false_negatives_embs_proj[:, 0], false_negatives_embs_proj[:, 1], s=2, color='darkviolet', label='false negatives')
+        for idx, f in enumerate(false_negatives_embs_proj):
+            plt.scatter(f[0], f[1], s=2, color='darkviolet')
+            plt.annotate(false_negatives_l[idx] + f' - {false_negatives_scores[idx]:.4f}', xy=(f[0], f[1]), xytext=(f[0]-.05, f[1]-.05), fontsize=1)
+
     if len(correct_embs) > 0:
         correct_embs_proj = mapper.transform(correct_embs)
-        plt.scatter(correct_embs_proj[:, 0], correct_embs_proj[:, 1], s=2, color='darkgreen', label='correct')
+        for idx, c in enumerate(correct_embs_proj):
+            plt.scatter(c[0], c[1], s=2, color='darkgreen')
+            plt.annotate(correct_l[idx] + f' - {correct_scores[idx]:.4f}', xy=(c[0], c[1]), xytext=(c[0]-.05, c[1]-.05), fontsize=1)
+
     q_emb = reduced_embeddings[selected_query].reshape(1, -1)
     q_emb = mapper.transform(q_emb)
     plt.scatter(q_emb[:, 0], q_emb[:, 1], s=2, color='goldenrod', label='query')
+    plt.title(f'Query: {selected_query}')
 
     plt.tight_layout()
     plt.show()

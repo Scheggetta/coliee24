@@ -80,7 +80,7 @@ def create_tabular_datasets():
         'normalization_model': normalization_model
     }
 
-    with open('Dataset/tabular_dataset.pkl', 'wb') as f:
+    with open(f'Dataset/tabular_dataset_{PE_CUTOFF}.pkl', 'wb') as f:
         pickle.dump(dataset, f)
 
 
@@ -214,7 +214,12 @@ def convert_scores(scores, targets, predicted_evidences):
                     scores[q_idx, e_idx] = -np.inf
 
     results = np.stack((scores, targets), axis=2)
-    results[:, ::-1, :].sort(axis=1)
+    order = np.argsort(results[:, :, 0])[:, ::-1]
+    ordered_scores = np.take_along_axis(results[:, :, 0], order, axis=1)
+    ordered_targets = np.take_along_axis(results[:, :, 1], order, axis=1)
+    results = np.stack((ordered_scores, ordered_targets), axis=2)
+
+    # results[:, ::-1, :].sort(axis=1)
     # Shape: (n_queries, pe_cutoff, 2)
     np.apply_along_axis(apply_cutoff, 1, results[:, :, 0])
     return results
@@ -263,7 +268,7 @@ if __name__ == '__main__':
     if CATBOOST_WHOLE_DATASET:
         dataset_path = Path.joinpath(Path('Dataset'), Path('tabular_dataset.pkl'))
     else:
-        dataset_path = Path.joinpath(Path('Dataset'), Path('tabular_dataset_split.pkl'))
+        dataset_path = Path.joinpath(Path('Dataset'), Path(f'tabular_dataset_{PE_CUTOFF}.pkl'))
     with open(dataset_path, 'rb') as f:
         dataset = pickle.load(f)
     train_group_id, train_features, train_labels, train_predicted_evidences = dataset['train']
@@ -287,7 +292,7 @@ if __name__ == '__main__':
         if CATBOOST_WHOLE_DATASET:
             model.load_model('catboost_model.bin')
         else:
-            model.load_model('catboost_model_split.bin')
+            model.load_model(f'catboost_model_{PE_CUTOFF}.bin')
     else:
         # Train the model
         if CATBOOST_WHOLE_DATASET:
@@ -295,16 +300,16 @@ if __name__ == '__main__':
             model.save_model('catboost_model.bin')
         else:
             model.fit(train_pool, eval_set=val_pool, verbose=True)
-            model.save_model('catboost_model_split.bin')
+            model.save_model(f'catboost_model_{PE_CUTOFF}.bin')
 
-    Y = model.predict(val_pool)
+    Y = model.predict(test_pool)
 
-    n_queries = len(set(val_group_id))
+    n_queries = len(set(test_group_id))
     Y = Y.reshape(n_queries, PE_CUTOFF)
-    gt = np.array(val_labels).reshape(n_queries, PE_CUTOFF)
+    gt = np.array(test_labels).reshape(n_queries, PE_CUTOFF)
 
-    res = convert_scores(Y, gt, val_predicted_evidences)
-    metrics = get_metrics(res, missed_positives=get_missed_positives(val_predicted_evidences, mode='val'))
+    res = convert_scores(Y, gt, test_predicted_evidences)
+    metrics = get_metrics(res, missed_positives=get_missed_positives(test_predicted_evidences, mode='test'))
     print(f'Precision: {metrics[0]:.6f}, Recall: {metrics[1]:.6f}, F1 score: {metrics[2]:.6f}')
     print(model.get_feature_importance(test_pool, type='PredictionValuesChange', prettified=True))
 
